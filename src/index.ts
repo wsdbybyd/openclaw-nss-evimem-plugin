@@ -1,7 +1,9 @@
 import { getCallId, isRecord, recordToolEvidence, stableStringify, utcNow } from "./evidence-store.js";
+import { validateTaskContract } from "./contract-validator.js";
 import { importEvidenceMemoryPack } from "./pack-importer.js";
 import { promoteEvidenceToMemory, retrieveMemories } from "./memory-store.js";
 import { decideGuardRoute, writeGuardEvent } from "./router.js";
+import { listToolCapabilities, registerToolCapability } from "./tool-capability-registry.js";
 import type {
   AgentToolResult,
   AnyAgentTool,
@@ -91,7 +93,15 @@ function registerHooks(api: PluginApi): void {
 }
 
 function registerHelperTools(api: PluginApi): void {
-  for (const tool of [createPromoteMemoryTool(), createRetrieveMemoryTool(), createGuardDecisionTool(), createImportPackTool()]) {
+  for (const tool of [
+    createPromoteMemoryTool(),
+    createRetrieveMemoryTool(),
+    createGuardDecisionTool(),
+    createImportPackTool(),
+    createRegisterToolCapabilityTool(),
+    createListToolCapabilitiesTool(),
+    createValidateContractTool(),
+  ]) {
     api.registerTool?.(tool, { name: tool.name });
   }
 }
@@ -218,6 +228,100 @@ function createImportPackTool(): AnyAgentTool {
         evidence_dir: optionalString(params.evidence_dir),
         tags: optionalStringArray(params.tags),
         replace_existing: optionalBoolean(params.replace_existing),
+      });
+      return jsonToolResult(result);
+    },
+  };
+}
+
+function createRegisterToolCapabilityTool(): AnyAgentTool {
+  return {
+    name: "nss_evimem_register_tool_capability",
+    label: "Register Tool Capability",
+    description: "Register or update a structured capability declaration for an external tool.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["tool_name", "capability"],
+      properties: {
+        tool_name: { type: "string" },
+        capability: { type: "object" },
+        metadata: { type: "object" },
+        replace_existing: { type: "boolean" },
+        evidence_dir: { type: "string" },
+      },
+    },
+    async execute(_toolCallId: string, rawParams: unknown): Promise<AgentToolResult> {
+      const params = requireRecord(rawParams);
+      const result = registerToolCapability({
+        tool_name: requireString(params.tool_name, "tool_name"),
+        capability: requireRecord(params.capability),
+        metadata: isRecord(params.metadata) ? params.metadata : {},
+        replace_existing: optionalBoolean(params.replace_existing),
+        evidence_dir: optionalString(params.evidence_dir),
+      });
+      return jsonToolResult(result);
+    },
+  };
+}
+
+function createListToolCapabilitiesTool(): AnyAgentTool {
+  return {
+    name: "nss_evimem_list_tool_capabilities",
+    label: "List Tool Capabilities",
+    description: "List registered tool capability declarations for the current evidence directory.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        tool_name: { type: "string" },
+        evidence_dir: { type: "string" },
+      },
+    },
+    async execute(_toolCallId: string, rawParams: unknown): Promise<AgentToolResult> {
+      const params = rawParams === undefined ? {} : requireRecord(rawParams);
+      const result = listToolCapabilities({
+        tool_name: optionalString(params.tool_name),
+        evidence_dir: optionalString(params.evidence_dir),
+      });
+      return jsonToolResult(result);
+    },
+  };
+}
+
+function createValidateContractTool(): AnyAgentTool {
+  return {
+    name: "nss_evimem_validate_contract",
+    label: "Validate Task Contract",
+    description: "Validate an Agent-generated candidate Task Contract and optionally persist it as the current session contract.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["task_contract"],
+      properties: {
+        task_contract: { type: "object" },
+        required_fields: { type: "array", items: { type: "string" } },
+        supported_domains: { type: "array", items: { type: "string" } },
+        supported_analysis_types: { type: "array", items: { type: "string" } },
+        supported_methods: { type: "array", items: { type: "string" } },
+        supported_scopes: { type: "array", items: { type: "string" } },
+        require_matching_tool: { type: "boolean" },
+        save_as_current: { type: "boolean" },
+        evidence_dir: { type: "string" },
+      },
+    },
+    async execute(_toolCallId: string, rawParams: unknown): Promise<AgentToolResult> {
+      const params = requireRecord(rawParams);
+      const result = validateTaskContract({
+        task_contract: requireRecord(params.task_contract),
+        required_fields: optionalStringArray(params.required_fields),
+        supported_domains: optionalStringArray(params.supported_domains),
+        supported_analysis_types: optionalStringArray(params.supported_analysis_types),
+        supported_methods: optionalStringArray(params.supported_methods),
+        supported_scopes: optionalStringArray(params.supported_scopes),
+        require_matching_tool: optionalBoolean(params.require_matching_tool),
+        save_as_current: optionalBoolean(params.save_as_current),
+        evidence_dir: optionalString(params.evidence_dir),
       });
       return jsonToolResult(result);
     },

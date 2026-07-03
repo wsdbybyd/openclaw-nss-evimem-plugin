@@ -84,6 +84,31 @@ export type TaskContract = JsonRecord;
 
 export type ToolCapability = JsonRecord;
 
+export type ToolCapabilityRecord = {
+  tool_name: string;
+  capability: ToolCapability;
+  registered_at: string;
+  updated_at: string;
+  metadata: JsonRecord;
+};
+
+export type ContractValidationStatus =
+  | "valid_contract"
+  | "incomplete_contract"
+  | "invalid_contract"
+  | "unsupported_contract";
+
+export type ContractValidationResult = {
+  timestamp: string;
+  status: ContractValidationStatus;
+  ok: boolean;
+  task_contract: TaskContract;
+  missing_fields: string[];
+  reasons: string[];
+  matching_tools: string[];
+  saved_as_current: boolean;
+};
+
 export type GuardMode = "pre_block" | "pre_redirect" | "post_check" | "post_repair" | "observe";
 
 export type GuardDecisionType = "allow" | "block" | "redirect" | "allow_after_check" | "post_repair_required";

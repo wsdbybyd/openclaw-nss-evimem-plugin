@@ -13,6 +13,8 @@ This package intentionally does not include cryptanalysis tools, OCP/MILP code, 
 - Evidence store: writes `tool_calls.jsonl` and `evidence_index.json`.
 - Evidence Memory: promotes valid evidence into `memory_records.json` and retrieves only memories whose task contract matches the current task.
 - Generic guard decisions: compares a task contract with a tool capability and records block, redirect, post-check, or post-repair decisions in `tool_guard_events.jsonl`.
+- Tool Capability Registry: stores structured external-tool capability declarations in `tool_capabilities.json`.
+- Task Contract validation: validates Agent-generated candidate contracts and persists valid session contracts in `task_contract.json`.
 
 ## Install and Build
 
@@ -38,9 +40,81 @@ nss_evimem_promote_memory
 nss_evimem_retrieve_memory
 nss_evimem_guard_decision
 nss_evimem_import_pack
+nss_evimem_register_tool_capability
+nss_evimem_list_tool_capabilities
+nss_evimem_validate_contract
 ```
 
 ## Helper Tools
+
+### `nss_evimem_register_tool_capability`
+
+Registers or updates an external tool capability declaration. The plugin does not need to know every possible tool in advance; callers can register project-level or session-level capabilities before validation and guard checks.
+
+Input:
+
+```json
+{
+  "tool_name": "simon32_dl_search",
+  "capability": {
+    "domain": "symmetric_cryptanalysis",
+    "analysis_type": "differential_linear",
+    "method": "script_search",
+    "scope": "full_cipher",
+    "claim_types": ["distinguisher_candidate", "empirical_correlation"],
+    "produced_artifacts": ["code", "run_log", "search_result"]
+  },
+  "evidence_dir": "C:/tmp/nss-evimem-session"
+}
+```
+
+Records are stored in `tool_capabilities.json`. Existing records with the same `tool_name` are replaced unless `replace_existing` is set to `false`.
+
+### `nss_evimem_list_tool_capabilities`
+
+Lists registered capability declarations.
+
+Input:
+
+```json
+{
+  "evidence_dir": "C:/tmp/nss-evimem-session"
+}
+```
+
+The result includes `count` and a `capabilities` array. Add `tool_name` to filter to one tool.
+
+### `nss_evimem_validate_contract`
+
+Validates an Agent-generated candidate Task Contract. Natural-language understanding remains the Agent's job; the plugin only checks the structured contract for completeness, basic semantic consistency, optional support lists, and optional matching registered tools.
+
+Input:
+
+```json
+{
+  "task_contract": {
+    "domain": "symmetric_cryptanalysis",
+    "cipher": "Simon32/64",
+    "rounds": 14,
+    "analysis_type": "differential_linear",
+    "method": "script_search",
+    "objective": "distinguisher_candidate",
+    "scope": "full_cipher",
+    "required_artifacts": ["code", "run_log", "search_result"]
+  },
+  "require_matching_tool": true,
+  "evidence_dir": "C:/tmp/nss-evimem-session"
+}
+```
+
+Possible statuses:
+
+- `valid_contract`
+- `incomplete_contract`
+- `invalid_contract`
+- `unsupported_contract`
+
+Each validation is appended to `contract_validation_events.jsonl`. Valid contracts are saved as `task_contract.json` by default; pass `save_as_current: false` to validate without updating the session contract.
 
 ### `nss_evimem_import_pack`
 
@@ -152,6 +226,9 @@ tool_calls.jsonl
 evidence_index.json
 memory_records.json
 tool_guard_events.jsonl
+tool_capabilities.json
+task_contract.json
+contract_validation_events.jsonl
 ```
 
 ## Environment Variables
@@ -166,7 +243,7 @@ npm run build
 npm run smoke
 ```
 
-The smoke test simulates an external user tool, captures evidence, promotes evidence-backed memory, retrieves matching memory, rejects stale memory, and writes one guard decision. The summary should contain:
+The smoke test simulates an external user tool, captures evidence, promotes evidence-backed memory, retrieves matching memory, rejects stale memory, writes one guard decision, registers a tool capability, validates a task contract, and imports a fixture EvidenceMemory pack. The summary should contain:
 
 ```json
 {

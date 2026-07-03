@@ -216,6 +216,9 @@ const requiredTools = [
   "nss_evimem_retrieve_memory",
   "nss_evimem_guard_decision",
   "nss_evimem_import_pack",
+  "nss_evimem_register_tool_capability",
+  "nss_evimem_list_tool_capabilities",
+  "nss_evimem_validate_contract",
 ];
 for (const toolName of requiredTools) {
   if (!tools.has(toolName)) {
@@ -259,6 +262,9 @@ const promoteTool = tools.get("nss_evimem_promote_memory");
 const retrieveTool = tools.get("nss_evimem_retrieve_memory");
 const guardTool = tools.get("nss_evimem_guard_decision");
 const importTool = tools.get("nss_evimem_import_pack");
+const registerCapabilityTool = tools.get("nss_evimem_register_tool_capability");
+const listCapabilitiesTool = tools.get("nss_evimem_list_tool_capabilities");
+const validateContractTool = tools.get("nss_evimem_validate_contract");
 const taskContract = {
   domain: "demo",
   objective: "verified_artifact",
@@ -302,6 +308,46 @@ const guard = await guardTool.execute("guard-1", {
   evidence_dir: evidenceDir,
 });
 
+const capabilityRegistration = await registerCapabilityTool.execute("capability-register-1", {
+  tool_name: "simon32_dl_search",
+  capability: {
+    domain: "symmetric_cryptanalysis",
+    analysis_type: "differential_linear",
+    method: "script_search",
+    scope: "full_cipher",
+    claim_types: ["distinguisher_candidate", "empirical_correlation"],
+    produced_artifacts: ["code", "run_log", "search_result"],
+  },
+  evidence_dir: evidenceDir,
+});
+
+const listedCapabilities = await listCapabilitiesTool.execute("capability-list-1", {
+  evidence_dir: evidenceDir,
+});
+
+const validContract = await validateContractTool.execute("contract-valid-1", {
+  task_contract: {
+    domain: "symmetric_cryptanalysis",
+    cipher: "Simon32/64",
+    rounds: 14,
+    analysis_type: "differential_linear",
+    method: "script_search",
+    objective: "distinguisher_candidate",
+    scope: "full_cipher",
+    required_artifacts: ["code", "run_log", "search_result"],
+  },
+  require_matching_tool: true,
+  evidence_dir: evidenceDir,
+});
+
+const incompleteContract = await validateContractTool.execute("contract-incomplete-1", {
+  task_contract: {
+    domain: "symmetric_cryptanalysis",
+    cipher: "SIMON",
+  },
+  evidence_dir: evidenceDir,
+});
+
 const imported = await importTool.execute("import-pack-1", {
   pack_dir: fixturePackDir,
   evidence_dir: evidenceDir,
@@ -330,13 +376,23 @@ const toolCallsPath = join(evidenceDir, "tool_calls.jsonl");
 const evidenceIndexPath = join(evidenceDir, "evidence_index.json");
 const memoryPath = join(evidenceDir, "memory_records.json");
 const guardEventsPath = join(evidenceDir, "tool_guard_events.jsonl");
+const capabilityRegistryPath = join(evidenceDir, "tool_capabilities.json");
+const contractStorePath = join(evidenceDir, "task_contract.json");
+const contractEventsPath = join(evidenceDir, "contract_validation_events.jsonl");
 const records = readJsonl(toolCallsPath);
 const index = readJson(evidenceIndexPath);
 const memories = readJson(memoryPath);
 const guardEvents = readJsonl(guardEventsPath);
+const capabilityRegistry = readJson(capabilityRegistryPath);
+const storedContract = readJson(contractStorePath);
+const contractEvents = readJsonl(contractEventsPath);
 const retrievedDetails = retrieved.details;
 const staleDetails = staleRetrieved.details;
 const guardDetails = guard.details;
+const capabilityRegistrationDetails = capabilityRegistration.details;
+const listedCapabilitiesDetails = listedCapabilities.details;
+const validContractDetails = validContract.details;
+const incompleteContractDetails = incompleteContract.details;
 const importedDetails = imported.details;
 const importedMilpDetails = importedMilpRetrieved.details;
 const importedPaper09Details = importedPaper09Retrieved.details;
@@ -356,6 +412,16 @@ const summary = {
     && staleDetails.rejected.length === 1
     && guardDetails.decision === "redirect"
     && guardEvents.length === 1
+    && capabilityRegistrationDetails.tool_name === "simon32_dl_search"
+    && listedCapabilitiesDetails.capabilities.some((record) => record.tool_name === "simon32_dl_search")
+    && capabilityRegistry.simon32_dl_search.capability.analysis_type === "differential_linear"
+    && validContractDetails.status === "valid_contract"
+    && validContractDetails.ok === true
+    && validContractDetails.matching_tools.includes("simon32_dl_search")
+    && storedContract.cipher === "Simon32/64"
+    && incompleteContractDetails.status === "incomplete_contract"
+    && incompleteContractDetails.missing_fields.includes("analysis_type")
+    && contractEvents.length === 2
     && importedDetails.imported === 3
     && importedDetails.total_memory_records === 4
     && importedMilpDetails.accepted.length >= 1
@@ -374,11 +440,18 @@ const summary = {
     evidence_index: evidenceIndexPath,
     memory_records: memoryPath,
     tool_guard_events: guardEventsPath,
+    tool_capabilities: capabilityRegistryPath,
+    task_contract: contractStorePath,
+    contract_validation_events: contractEventsPath,
   },
   memory: promoted.details,
   retrieval: retrieved.details,
   stale_retrieval: staleRetrieved.details,
   guard_decision: guard.details,
+  capability_registration: capabilityRegistration.details,
+  listed_capabilities: listedCapabilities.details,
+  valid_contract: validContract.details,
+  incomplete_contract: incompleteContract.details,
   imported_memory_pack: imported.details,
   imported_milp_retrieval: importedMilpRetrieved.details,
   imported_paper09_retrieval: importedPaper09Retrieved.details,
