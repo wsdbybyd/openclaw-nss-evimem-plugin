@@ -1,0 +1,8 @@
+node_modules/
+dist/
+smoke-output/
+evidence/
+
+*.log
+.env
+.env.*

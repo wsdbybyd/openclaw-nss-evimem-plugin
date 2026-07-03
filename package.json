@@ -1,0 +1,21 @@
+{
+  "name": "openclaw-nss-evimem-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Generic OpenClaw plugin for NSS-EviMem evidence capture, evidence-backed memory, and guard decisions.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "typescript": "^5.4.0"
+  }
+}
