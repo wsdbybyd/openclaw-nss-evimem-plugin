@@ -219,6 +219,7 @@ const requiredTools = [
   "nss_evimem_register_tool_capability",
   "nss_evimem_list_tool_capabilities",
   "nss_evimem_validate_contract",
+  "nss_evimem_diagnose_failure",
 ];
 for (const toolName of requiredTools) {
   if (!tools.has(toolName)) {
@@ -265,6 +266,7 @@ const importTool = tools.get("nss_evimem_import_pack");
 const registerCapabilityTool = tools.get("nss_evimem_register_tool_capability");
 const listCapabilitiesTool = tools.get("nss_evimem_list_tool_capabilities");
 const validateContractTool = tools.get("nss_evimem_validate_contract");
+const diagnoseFailureTool = tools.get("nss_evimem_diagnose_failure");
 const taskContract = {
   domain: "demo",
   objective: "verified_artifact",
@@ -348,6 +350,35 @@ const incompleteContract = await validateContractTool.execute("contract-incomple
   evidence_dir: evidenceDir,
 });
 
+const failureDiagnosis = await diagnoseFailureTool.execute("failure-diagnosis-1", {
+  case_id: "CBSC-V2-HARD-SIMON32-DL-SEARCH-002",
+  task_contract: {
+    domain: "symmetric_cryptanalysis",
+    cipher: "Simon32/64",
+    rounds: 14,
+    analysis_type: "differential_linear",
+    method: "script_search",
+    objective: "distinguisher_candidate",
+    scope: "full_cipher",
+  },
+  run_summary: {
+    final_correctness: "partially_correct_or_insufficient",
+    evidence_completeness: "partial",
+    claim_boundary_ok: true,
+    overclaiming_detected: false,
+    openclaw_error: "spawnSync node.exe ETIMEDOUT",
+    oracle_alignment: {
+      paper_pair_match: false,
+      best_split_mentioned: false,
+    },
+  },
+  observations: [
+    "quick scan candidates vanished under multi-key verification; likely statistical noise",
+    "search process was killed after no new output",
+  ],
+  evidence_dir: evidenceDir,
+});
+
 const imported = await importTool.execute("import-pack-1", {
   pack_dir: fixturePackDir,
   evidence_dir: evidenceDir,
@@ -379,6 +410,9 @@ const guardEventsPath = join(evidenceDir, "tool_guard_events.jsonl");
 const capabilityRegistryPath = join(evidenceDir, "tool_capabilities.json");
 const contractStorePath = join(evidenceDir, "task_contract.json");
 const contractEventsPath = join(evidenceDir, "contract_validation_events.jsonl");
+const failureDiagnosisPath = join(evidenceDir, "failure_diagnosis.json");
+const failureDiagnosisEventsPath = join(evidenceDir, "failure_diagnosis_events.jsonl");
+const rerunPlanPath = join(evidenceDir, "rerun_plan.md");
 const records = readJsonl(toolCallsPath);
 const index = readJson(evidenceIndexPath);
 const memories = readJson(memoryPath);
@@ -386,6 +420,9 @@ const guardEvents = readJsonl(guardEventsPath);
 const capabilityRegistry = readJson(capabilityRegistryPath);
 const storedContract = readJson(contractStorePath);
 const contractEvents = readJsonl(contractEventsPath);
+const failureDiagnosisFile = readJson(failureDiagnosisPath);
+const failureDiagnosisEvents = readJsonl(failureDiagnosisEventsPath);
+const rerunPlan = readFileSync(rerunPlanPath, "utf8");
 const retrievedDetails = retrieved.details;
 const staleDetails = staleRetrieved.details;
 const guardDetails = guard.details;
@@ -393,6 +430,7 @@ const capabilityRegistrationDetails = capabilityRegistration.details;
 const listedCapabilitiesDetails = listedCapabilities.details;
 const validContractDetails = validContract.details;
 const incompleteContractDetails = incompleteContract.details;
+const failureDiagnosisDetails = failureDiagnosis.details;
 const importedDetails = imported.details;
 const importedMilpDetails = importedMilpRetrieved.details;
 const importedPaper09Details = importedPaper09Retrieved.details;
@@ -422,6 +460,17 @@ const summary = {
     && incompleteContractDetails.status === "incomplete_contract"
     && incompleteContractDetails.missing_fields.includes("analysis_type")
     && contractEvents.length === 2
+    && failureDiagnosisDetails.status === "needs_rerun"
+    && failureDiagnosisDetails.failure_types.includes("search_timeout")
+    && failureDiagnosisDetails.failure_types.includes("candidate_statistical_noise")
+    && failureDiagnosisDetails.failure_types.includes("oracle_mismatch")
+    && failureDiagnosisDetails.failure_types.includes("insufficient_evidence")
+    && failureDiagnosisDetails.output_files.failure_diagnosis === failureDiagnosisPath
+    && failureDiagnosisDetails.output_files.rerun_plan === rerunPlanPath
+    && failureDiagnosisFile.failure_types.includes("candidate_statistical_noise")
+    && failureDiagnosisEvents.length === 1
+    && rerunPlan.includes("## Rerun Checklist")
+    && rerunPlan.includes("Use the existing validated Task Contract")
     && importedDetails.imported === 3
     && importedDetails.total_memory_records === 4
     && importedMilpDetails.accepted.length >= 1
@@ -443,6 +492,9 @@ const summary = {
     tool_capabilities: capabilityRegistryPath,
     task_contract: contractStorePath,
     contract_validation_events: contractEventsPath,
+    failure_diagnosis: failureDiagnosisPath,
+    failure_diagnosis_events: failureDiagnosisEventsPath,
+    rerun_plan: rerunPlanPath,
   },
   memory: promoted.details,
   retrieval: retrieved.details,
@@ -452,6 +504,7 @@ const summary = {
   listed_capabilities: listedCapabilities.details,
   valid_contract: validContract.details,
   incomplete_contract: incompleteContract.details,
+  failure_diagnosis: failureDiagnosis.details,
   imported_memory_pack: imported.details,
   imported_milp_retrieval: importedMilpRetrieved.details,
   imported_paper09_retrieval: importedPaper09Retrieved.details,

@@ -15,6 +15,7 @@ This package intentionally does not include cryptanalysis tools, OCP/MILP code, 
 - Generic guard decisions: compares a task contract with a tool capability and records block, redirect, post-check, or post-repair decisions in `tool_guard_events.jsonl`.
 - Tool Capability Registry: stores structured external-tool capability declarations in `tool_capabilities.json`.
 - Task Contract validation: validates Agent-generated candidate contracts and persists valid session contracts in `task_contract.json`.
+- Failure diagnosis and rerun planning: writes `failure_diagnosis.json`, `failure_diagnosis_events.jsonl`, and `rerun_plan.md` when a run is incomplete, noisy, timed out, mismatched, or overclaiming.
 
 ## Install and Build
 
@@ -43,6 +44,7 @@ nss_evimem_import_pack
 nss_evimem_register_tool_capability
 nss_evimem_list_tool_capabilities
 nss_evimem_validate_contract
+nss_evimem_diagnose_failure
 ```
 
 ## Helper Tools
@@ -115,6 +117,60 @@ Possible statuses:
 - `unsupported_contract`
 
 Each validation is appended to `contract_validation_events.jsonl`. Valid contracts are saved as `task_contract.json` by default; pass `save_as_current: false` to validate without updating the session contract.
+
+### `nss_evimem_diagnose_failure`
+
+Generates a structured diagnosis and rerun plan from the current evidence directory plus an optional run summary. This tool does not solve the cryptanalysis task and does not execute reruns; it gives the Agent an auditable failure classification and a bounded next-run checklist.
+
+Input:
+
+```json
+{
+  "case_id": "CBSC-V2-HARD-SIMON32-DL-SEARCH-002",
+  "task_contract": {
+    "domain": "symmetric_cryptanalysis",
+    "cipher": "Simon32/64",
+    "rounds": 14,
+    "analysis_type": "differential_linear",
+    "method": "script_search",
+    "objective": "distinguisher_candidate",
+    "scope": "full_cipher"
+  },
+  "run_summary": {
+    "final_correctness": "partially_correct_or_insufficient",
+    "evidence_completeness": "partial",
+    "claim_boundary_ok": true,
+    "overclaiming_detected": false,
+    "openclaw_error": "spawnSync node.exe ETIMEDOUT",
+    "oracle_alignment": {
+      "paper_pair_match": false,
+      "best_split_mentioned": false
+    }
+  },
+  "observations": [
+    "quick-scan candidates vanished under multi-key verification",
+    "search process was killed after no new output"
+  ],
+  "evidence_dir": "C:/tmp/nss-evimem-session"
+}
+```
+
+Detected failure types include:
+
+- `search_timeout`
+- `candidate_statistical_noise`
+- `oracle_mismatch`
+- `insufficient_evidence`
+- `task_contract_unvalidated`
+- `tool_capability_missing`
+- `tool_contract_mismatch`
+- `overclaiming`
+
+Outputs:
+
+- `failure_diagnosis.json`: latest structured diagnosis.
+- `failure_diagnosis_events.jsonl`: append-only diagnosis history.
+- `rerun_plan.md`: human-readable rerun checklist for the next Agent turn.
 
 ### `nss_evimem_import_pack`
 
@@ -229,6 +285,9 @@ tool_guard_events.jsonl
 tool_capabilities.json
 task_contract.json
 contract_validation_events.jsonl
+failure_diagnosis.json
+failure_diagnosis_events.jsonl
+rerun_plan.md
 ```
 
 ## Environment Variables
@@ -243,7 +302,7 @@ npm run build
 npm run smoke
 ```
 
-The smoke test simulates an external user tool, captures evidence, promotes evidence-backed memory, retrieves matching memory, rejects stale memory, writes one guard decision, registers a tool capability, validates a task contract, and imports a fixture EvidenceMemory pack. The summary should contain:
+The smoke test simulates an external user tool, captures evidence, promotes evidence-backed memory, retrieves matching memory, rejects stale memory, writes one guard decision, registers a tool capability, validates a task contract, diagnoses a failed run, writes a rerun plan, and imports a fixture EvidenceMemory pack. The summary should contain:
 
 ```json
 {

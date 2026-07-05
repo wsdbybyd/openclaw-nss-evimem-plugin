@@ -1,4 +1,5 @@
 import { getCallId, isRecord, recordToolEvidence, stableStringify, utcNow } from "./evidence-store.js";
+import { diagnoseFailure } from "./failure-diagnosis.js";
 import { validateTaskContract } from "./contract-validator.js";
 import { importEvidenceMemoryPack } from "./pack-importer.js";
 import { promoteEvidenceToMemory, retrieveMemories } from "./memory-store.js";
@@ -101,6 +102,7 @@ function registerHelperTools(api: PluginApi): void {
     createRegisterToolCapabilityTool(),
     createListToolCapabilitiesTool(),
     createValidateContractTool(),
+    createDiagnoseFailureTool(),
   ]) {
     api.registerTool?.(tool, { name: tool.name });
   }
@@ -321,6 +323,36 @@ function createValidateContractTool(): AnyAgentTool {
         supported_scopes: optionalStringArray(params.supported_scopes),
         require_matching_tool: optionalBoolean(params.require_matching_tool),
         save_as_current: optionalBoolean(params.save_as_current),
+        evidence_dir: optionalString(params.evidence_dir),
+      });
+      return jsonToolResult(result);
+    },
+  };
+}
+
+function createDiagnoseFailureTool(): AnyAgentTool {
+  return {
+    name: "nss_evimem_diagnose_failure",
+    label: "Diagnose Failure",
+    description: "Generate a structured failure diagnosis and rerun plan from NSS-EviMem evidence, contract, capability, guard, and run-summary signals.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        case_id: { type: "string" },
+        task_contract: { type: "object" },
+        run_summary: { type: "object" },
+        observations: { type: "array", items: { type: "string" } },
+        evidence_dir: { type: "string" },
+      },
+    },
+    async execute(_toolCallId: string, rawParams: unknown): Promise<AgentToolResult> {
+      const params = rawParams === undefined ? {} : requireRecord(rawParams);
+      const result = diagnoseFailure({
+        case_id: optionalString(params.case_id),
+        task_contract: isRecord(params.task_contract) ? params.task_contract : undefined,
+        run_summary: isRecord(params.run_summary) ? params.run_summary : undefined,
+        observations: optionalStringArray(params.observations),
         evidence_dir: optionalString(params.evidence_dir),
       });
       return jsonToolResult(result);

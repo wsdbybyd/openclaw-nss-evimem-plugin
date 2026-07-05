@@ -4,6 +4,7 @@ smoke-output/
 evidence/
 cases/**/inputs/
 cases/**/outputs/
+experiments/**/runs/
 
 *.log
 .env
