@@ -20,7 +20,8 @@
       "nss_evimem_register_tool_capability",
       "nss_evimem_list_tool_capabilities",
       "nss_evimem_validate_contract",
-      "nss_evimem_diagnose_failure"
+      "nss_evimem_diagnose_failure",
+      "nss_evimem_build_rerun_context"
     ]
   },
   "configSchema": {

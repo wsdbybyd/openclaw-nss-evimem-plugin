@@ -17,7 +17,10 @@
     "experiment:cbsc-simon32-dl:all": "npm run experiment:cbsc-simon32-dl && npm run experiment:cbsc-simon32-dl:verify",
     "experiment:cbsc-simon32-dl:openclaw-real": "node experiments/CBSC-V2-HARD-SIMON32-DL-SEARCH-002/run_openclaw_real_experiment.mjs",
     "experiment:cbsc-simon32-dl:openclaw-real:verify": "node experiments/CBSC-V2-HARD-SIMON32-DL-SEARCH-002/verify_openclaw_real_experiment.mjs",
-    "experiment:cbsc-simon32-dl:openclaw-real:all": "npm run experiment:cbsc-simon32-dl:openclaw-real && npm run experiment:cbsc-simon32-dl:openclaw-real:verify"
+    "experiment:cbsc-simon32-dl:openclaw-real:all": "npm run experiment:cbsc-simon32-dl:openclaw-real && npm run experiment:cbsc-simon32-dl:openclaw-real:verify",
+    "experiment:cbsc-simon32-dl:openclaw-rerun": "node experiments/CBSC-V2-HARD-SIMON32-DL-SEARCH-002/run_openclaw_real_rerun_experiment.mjs",
+    "experiment:cbsc-simon32-dl:openclaw-rerun:verify": "node experiments/CBSC-V2-HARD-SIMON32-DL-SEARCH-002/verify_openclaw_real_rerun_experiment.mjs",
+    "experiment:cbsc-simon32-dl:openclaw-rerun:all": "npm run experiment:cbsc-simon32-dl:openclaw-rerun && npm run experiment:cbsc-simon32-dl:openclaw-rerun:verify"
   },
   "openclaw": {
     "extensions": [

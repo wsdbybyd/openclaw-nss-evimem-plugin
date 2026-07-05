@@ -30,6 +30,12 @@ Run a real local OpenClaw baseline-vs-plugin experiment:
 npm run experiment:cbsc-simon32-dl:openclaw-real:all
 ```
 
+Run a real local OpenClaw pass2 rerun experiment seeded from `runs/openclaw-real-latest/`:
+
+```powershell
+npm run experiment:cbsc-simon32-dl:openclaw-rerun:all
+```
+
 ## Local Artifacts
 
-The controlled experiment is written to `runs/latest/`. The real OpenClaw experiment is written to `runs/openclaw-real-latest/`. These directories are ignored by Git because they contain local evaluation artifacts, model outputs, logs, and oracle-derived labels.
+The controlled experiment is written to `runs/latest/`. The real OpenClaw experiment is written to `runs/openclaw-real-latest/`. The pass2 rerun experiment is written to `runs/openclaw-real-rerun-latest/`. These directories are ignored by Git because they contain local evaluation artifacts, model outputs, logs, and oracle-derived labels.

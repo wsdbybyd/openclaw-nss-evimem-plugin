@@ -220,6 +220,7 @@ const requiredTools = [
   "nss_evimem_list_tool_capabilities",
   "nss_evimem_validate_contract",
   "nss_evimem_diagnose_failure",
+  "nss_evimem_build_rerun_context",
 ];
 for (const toolName of requiredTools) {
   if (!tools.has(toolName)) {
@@ -267,6 +268,7 @@ const registerCapabilityTool = tools.get("nss_evimem_register_tool_capability");
 const listCapabilitiesTool = tools.get("nss_evimem_list_tool_capabilities");
 const validateContractTool = tools.get("nss_evimem_validate_contract");
 const diagnoseFailureTool = tools.get("nss_evimem_diagnose_failure");
+const buildRerunContextTool = tools.get("nss_evimem_build_rerun_context");
 const taskContract = {
   domain: "demo",
   objective: "verified_artifact",
@@ -379,6 +381,16 @@ const failureDiagnosis = await diagnoseFailureTool.execute("failure-diagnosis-1"
   evidence_dir: evidenceDir,
 });
 
+const rerunContext = await buildRerunContextTool.execute("rerun-context-1", {
+  case_id: "CBSC-V2-HARD-SIMON32-DL-SEARCH-002",
+  prior_result_summary: {
+    pass: "plugin_pass1",
+    final_correctness: "partially_correct_or_insufficient",
+    evidence_completeness: "complete_or_structured",
+  },
+  evidence_dir: evidenceDir,
+});
+
 const imported = await importTool.execute("import-pack-1", {
   pack_dir: fixturePackDir,
   evidence_dir: evidenceDir,
@@ -413,6 +425,7 @@ const contractEventsPath = join(evidenceDir, "contract_validation_events.jsonl")
 const failureDiagnosisPath = join(evidenceDir, "failure_diagnosis.json");
 const failureDiagnosisEventsPath = join(evidenceDir, "failure_diagnosis_events.jsonl");
 const rerunPlanPath = join(evidenceDir, "rerun_plan.md");
+const rerunContextPath = join(evidenceDir, "rerun_context.md");
 const records = readJsonl(toolCallsPath);
 const index = readJson(evidenceIndexPath);
 const memories = readJson(memoryPath);
@@ -423,6 +436,7 @@ const contractEvents = readJsonl(contractEventsPath);
 const failureDiagnosisFile = readJson(failureDiagnosisPath);
 const failureDiagnosisEvents = readJsonl(failureDiagnosisEventsPath);
 const rerunPlan = readFileSync(rerunPlanPath, "utf8");
+const rerunContextFile = readFileSync(rerunContextPath, "utf8");
 const retrievedDetails = retrieved.details;
 const staleDetails = staleRetrieved.details;
 const guardDetails = guard.details;
@@ -431,6 +445,7 @@ const listedCapabilitiesDetails = listedCapabilities.details;
 const validContractDetails = validContract.details;
 const incompleteContractDetails = incompleteContract.details;
 const failureDiagnosisDetails = failureDiagnosis.details;
+const rerunContextDetails = rerunContext.details;
 const importedDetails = imported.details;
 const importedMilpDetails = importedMilpRetrieved.details;
 const importedPaper09Details = importedPaper09Retrieved.details;
@@ -471,6 +486,11 @@ const summary = {
     && failureDiagnosisEvents.length === 1
     && rerunPlan.includes("## Rerun Checklist")
     && rerunPlan.includes("Use the existing validated Task Contract")
+    && rerunContextDetails.output_files.rerun_context === rerunContextPath
+    && rerunContextFile.includes("# NSS-EviMem Rerun Context")
+    && rerunContextFile.includes("Status: `needs_rerun`")
+    && rerunContextFile.includes("candidate_statistical_noise")
+    && rerunContextFile.includes("## Required Rerun Discipline")
     && importedDetails.imported === 3
     && importedDetails.total_memory_records === 4
     && importedMilpDetails.accepted.length >= 1
@@ -495,6 +515,7 @@ const summary = {
     failure_diagnosis: failureDiagnosisPath,
     failure_diagnosis_events: failureDiagnosisEventsPath,
     rerun_plan: rerunPlanPath,
+    rerun_context: rerunContextPath,
   },
   memory: promoted.details,
   retrieval: retrieved.details,
@@ -505,6 +526,7 @@ const summary = {
   valid_contract: validContract.details,
   incomplete_contract: incompleteContract.details,
   failure_diagnosis: failureDiagnosis.details,
+  rerun_context: rerunContext.details,
   imported_memory_pack: imported.details,
   imported_milp_retrieval: importedMilpRetrieved.details,
   imported_paper09_retrieval: importedPaper09Retrieved.details,

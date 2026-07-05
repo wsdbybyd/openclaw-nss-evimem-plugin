@@ -1,5 +1,6 @@
 import { getCallId, isRecord, recordToolEvidence, stableStringify, utcNow } from "./evidence-store.js";
 import { diagnoseFailure } from "./failure-diagnosis.js";
+import { buildRerunContext } from "./rerun-context.js";
 import { validateTaskContract } from "./contract-validator.js";
 import { importEvidenceMemoryPack } from "./pack-importer.js";
 import { promoteEvidenceToMemory, retrieveMemories } from "./memory-store.js";
@@ -103,6 +104,7 @@ function registerHelperTools(api: PluginApi): void {
     createListToolCapabilitiesTool(),
     createValidateContractTool(),
     createDiagnoseFailureTool(),
+    createBuildRerunContextTool(),
   ]) {
     api.registerTool?.(tool, { name: tool.name });
   }
@@ -353,6 +355,40 @@ function createDiagnoseFailureTool(): AnyAgentTool {
         task_contract: isRecord(params.task_contract) ? params.task_contract : undefined,
         run_summary: isRecord(params.run_summary) ? params.run_summary : undefined,
         observations: optionalStringArray(params.observations),
+        evidence_dir: optionalString(params.evidence_dir),
+      });
+      return jsonToolResult(result);
+    },
+  };
+}
+
+function createBuildRerunContextTool(): AnyAgentTool {
+  return {
+    name: "nss_evimem_build_rerun_context",
+    label: "Build Rerun Context",
+    description: "Build a compact rerun context from a previous failure diagnosis, rerun plan, Task Contract, tool capability registry, and evidence summary.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        case_id: { type: "string" },
+        failure_diagnosis_path: { type: "string" },
+        rerun_plan_path: { type: "string" },
+        output_path: { type: "string" },
+        prior_result_summary: { type: "object" },
+        extra_instructions: { type: "array", items: { type: "string" } },
+        evidence_dir: { type: "string" },
+      },
+    },
+    async execute(_toolCallId: string, rawParams: unknown): Promise<AgentToolResult> {
+      const params = rawParams === undefined ? {} : requireRecord(rawParams);
+      const result = buildRerunContext({
+        case_id: optionalString(params.case_id),
+        failure_diagnosis_path: optionalString(params.failure_diagnosis_path),
+        rerun_plan_path: optionalString(params.rerun_plan_path),
+        output_path: optionalString(params.output_path),
+        prior_result_summary: isRecord(params.prior_result_summary) ? params.prior_result_summary : undefined,
+        extra_instructions: optionalStringArray(params.extra_instructions),
         evidence_dir: optionalString(params.evidence_dir),
       });
       return jsonToolResult(result);
