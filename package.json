@@ -21,6 +21,9 @@
     "experiment:cbsc-simon32-dl:openclaw-rerun": "node experiments/CBSC-V2-HARD-SIMON32-DL-SEARCH-002/run_openclaw_real_rerun_experiment.mjs",
     "experiment:cbsc-simon32-dl:openclaw-rerun:verify": "node experiments/CBSC-V2-HARD-SIMON32-DL-SEARCH-002/verify_openclaw_real_rerun_experiment.mjs",
     "experiment:cbsc-simon32-dl:openclaw-rerun:all": "npm run experiment:cbsc-simon32-dl:openclaw-rerun && npm run experiment:cbsc-simon32-dl:openclaw-rerun:verify",
+    "experiment:cbsc-simon32-dl:openclaw-intervention": "npm run build && node experiments/CBSC-V2-HARD-SIMON32-DL-SEARCH-002/run_openclaw_real_intervention_experiment.mjs",
+    "experiment:cbsc-simon32-dl:openclaw-intervention:verify": "node experiments/CBSC-V2-HARD-SIMON32-DL-SEARCH-002/verify_openclaw_real_intervention_experiment.mjs",
+    "experiment:cbsc-simon32-dl:openclaw-intervention:all": "npm run experiment:cbsc-simon32-dl:openclaw-intervention && npm run experiment:cbsc-simon32-dl:openclaw-intervention:verify",
     "dataset:cbsc-simon32-dl:build": "node experiments/CBSC-V2-HARD-SIMON32-DL-SEARCH-002/build_failure_case_dataset.mjs",
     "dataset:cbsc-simon32-dl:verify": "node experiments/CBSC-V2-HARD-SIMON32-DL-SEARCH-002/verify_failure_case_dataset.mjs",
     "dataset:cbsc-simon32-dl:all": "npm run dataset:cbsc-simon32-dl:build && npm run dataset:cbsc-simon32-dl:verify"

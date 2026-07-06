@@ -123,6 +123,12 @@ Run a real local OpenClaw pass2 rerun experiment seeded from `runs/openclaw-real
 npm run experiment:cbsc-simon32-dl:openclaw-rerun:all
 ```
 
+Run a real local OpenClaw intervention-prompt experiment seeded from `runs/openclaw-real-rerun-latest/`:
+
+```powershell
+npm run experiment:cbsc-simon32-dl:openclaw-intervention:all
+```
+
 Build and verify the Direction A failure-case dataset:
 
 ```powershell
@@ -175,6 +181,7 @@ All experiment outputs are written under `runs/`:
 | `runs/latest/` | Controlled synthetic experiment output. |
 | `runs/openclaw-real-latest/` | Real local OpenClaw baseline-vs-plugin output. |
 | `runs/openclaw-real-rerun-latest/` | Real local OpenClaw pass2 rerun output. |
+| `runs/openclaw-real-intervention-latest/` | Real local OpenClaw B2 intervention-prompt output. |
 | `runs/failure-case-dataset-latest/` | Direction A dataset-builder output. |
 
 These directories are ignored by Git because they contain local evaluation artifacts, model outputs, logs, and oracle-derived labels.
@@ -195,4 +202,48 @@ It reads the current `failure_diagnosis.json`, `rerun_plan.md`, task contract, t
 
 This still stays within the plugin boundary. It does not solve the cryptanalysis task and does not modify OpenClaw internals directly. It gives the Agent or experiment harness an auditable prompt patch that blocks unsupported verified claims, requires bounded reruns, and forces an explicit evidence boundary.
 
-The next research step after B1 is to wire this intervention bundle into a real live OpenClaw pass and compare whether the Agent follows the prompt patch more reliably than the previous rerun-context-only setup.
+## Direction B2
+
+Direction B2 wires the B1 intervention bundle into a real local OpenClaw run.
+
+The runner:
+
+1. reads the existing `runs/openclaw-real-rerun-latest/` source run;
+2. copies the baseline, plugin pass1, and rerun-context arms as comparison arms;
+3. builds an intervention bundle from the pass1 evidence seed;
+4. injects the intervention `prompt_patch` into a fresh OpenClaw intervention-prompt arm;
+5. evaluates rerun-context-only vs intervention-prompt behavior.
+
+Run:
+
+```powershell
+npm run experiment:cbsc-simon32-dl:openclaw-intervention:all
+```
+
+The output is written to:
+
+```text
+runs/openclaw-real-intervention-latest/
+```
+
+Important files:
+
+| File | Purpose |
+|---|---|
+| `plugin_intervention/prompt.md` | The actual prompt with the injected B1 `prompt_patch`. |
+| `plugin_intervention/evidence/intervention.json` | Structured B1 intervention used by the B2 arm. |
+| `plugin_intervention/evidence/intervention.md` | Human-readable intervention bundle. |
+| `plugin_intervention/evaluation.json` | Evaluation of the intervention-prompt arm. |
+| `experiment_summary.json` | Four-arm summary: baseline, pass1, rerun context, intervention prompt. |
+| `comparison_matrix.csv` | Side-by-side metric table. |
+| `experiment_report.md` | Human-readable B2 report. |
+
+The current local B2 run shows:
+
+- intervention prompt built: `true`;
+- intervention prompt used: `true`;
+- intervention arm evidence completeness: `complete_or_structured`;
+- intervention arm final correctness: `partially_correct_or_insufficient`;
+- intervention arm overclaiming detected: `false`.
+
+So B2 currently supports the narrower claim-boundary correction result, not a full correction-to-verified-answer result.
