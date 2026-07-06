@@ -1,5 +1,6 @@
 import { getCallId, isRecord, recordToolEvidence, stableStringify, utcNow } from "./evidence-store.js";
 import { diagnoseFailure } from "./failure-diagnosis.js";
+import { buildIntervention } from "./intervention-builder.js";
 import { buildRerunContext } from "./rerun-context.js";
 import { validateTaskContract } from "./contract-validator.js";
 import { importEvidenceMemoryPack } from "./pack-importer.js";
@@ -105,6 +106,7 @@ function registerHelperTools(api: PluginApi): void {
     createValidateContractTool(),
     createDiagnoseFailureTool(),
     createBuildRerunContextTool(),
+    createBuildInterventionTool(),
   ]) {
     api.registerTool?.(tool, { name: tool.name });
   }
@@ -396,6 +398,44 @@ function createBuildRerunContextTool(): AnyAgentTool {
   };
 }
 
+function createBuildInterventionTool(): AnyAgentTool {
+  return {
+    name: "nss_evimem_build_intervention",
+    label: "Build Online Intervention",
+    description: "Build an online repair intervention prompt from failure diagnosis, rerun plan, task contract, tool capabilities, and evidence signals.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        case_id: { type: "string" },
+        intervention_mode: { type: "string", enum: ["online_repair_prompt", "report_boundary_prompt"] },
+        failure_diagnosis_path: { type: "string" },
+        rerun_plan_path: { type: "string" },
+        output_json_path: { type: "string" },
+        output_markdown_path: { type: "string" },
+        prior_result_summary: { type: "object" },
+        extra_instructions: { type: "array", items: { type: "string" } },
+        evidence_dir: { type: "string" },
+      },
+    },
+    async execute(_toolCallId: string, rawParams: unknown): Promise<AgentToolResult> {
+      const params = rawParams === undefined ? {} : requireRecord(rawParams);
+      const result = buildIntervention({
+        case_id: optionalString(params.case_id),
+        intervention_mode: optionalInterventionMode(params.intervention_mode),
+        failure_diagnosis_path: optionalString(params.failure_diagnosis_path),
+        rerun_plan_path: optionalString(params.rerun_plan_path),
+        output_json_path: optionalString(params.output_json_path),
+        output_markdown_path: optionalString(params.output_markdown_path),
+        prior_result_summary: isRecord(params.prior_result_summary) ? params.prior_result_summary : undefined,
+        extra_instructions: optionalStringArray(params.extra_instructions),
+        evidence_dir: optionalString(params.evidence_dir),
+      });
+      return jsonToolResult(result);
+    },
+  };
+}
+
 function jsonToolResult(details: unknown): AgentToolResult {
   return {
     content: [{ type: "text", text: stableStringify(details, 2) }],
@@ -450,4 +490,15 @@ function optionalGuardMode(value: unknown) {
     throw new Error(`unsupported guard_mode: ${text}`);
   }
   return text as "pre_block" | "pre_redirect" | "post_check" | "post_repair" | "observe";
+}
+
+function optionalInterventionMode(value: unknown) {
+  const text = optionalString(value);
+  if (!text) {
+    return undefined;
+  }
+  if (!["online_repair_prompt", "report_boundary_prompt"].includes(text)) {
+    throw new Error(`unsupported intervention_mode: ${text}`);
+  }
+  return text as "online_repair_prompt" | "report_boundary_prompt";
 }

@@ -221,6 +221,7 @@ const requiredTools = [
   "nss_evimem_validate_contract",
   "nss_evimem_diagnose_failure",
   "nss_evimem_build_rerun_context",
+  "nss_evimem_build_intervention",
 ];
 for (const toolName of requiredTools) {
   if (!tools.has(toolName)) {
@@ -269,6 +270,7 @@ const listCapabilitiesTool = tools.get("nss_evimem_list_tool_capabilities");
 const validateContractTool = tools.get("nss_evimem_validate_contract");
 const diagnoseFailureTool = tools.get("nss_evimem_diagnose_failure");
 const buildRerunContextTool = tools.get("nss_evimem_build_rerun_context");
+const buildInterventionTool = tools.get("nss_evimem_build_intervention");
 const taskContract = {
   domain: "demo",
   objective: "verified_artifact",
@@ -391,6 +393,17 @@ const rerunContext = await buildRerunContextTool.execute("rerun-context-1", {
   evidence_dir: evidenceDir,
 });
 
+const intervention = await buildInterventionTool.execute("intervention-1", {
+  case_id: "CBSC-V2-HARD-SIMON32-DL-SEARCH-002",
+  intervention_mode: "online_repair_prompt",
+  prior_result_summary: {
+    pass: "plugin_pass1",
+    final_correctness: "partially_correct_or_insufficient",
+    evidence_completeness: "complete_or_structured",
+  },
+  evidence_dir: evidenceDir,
+});
+
 const imported = await importTool.execute("import-pack-1", {
   pack_dir: fixturePackDir,
   evidence_dir: evidenceDir,
@@ -426,6 +439,8 @@ const failureDiagnosisPath = join(evidenceDir, "failure_diagnosis.json");
 const failureDiagnosisEventsPath = join(evidenceDir, "failure_diagnosis_events.jsonl");
 const rerunPlanPath = join(evidenceDir, "rerun_plan.md");
 const rerunContextPath = join(evidenceDir, "rerun_context.md");
+const interventionJsonPath = join(evidenceDir, "intervention.json");
+const interventionMarkdownPath = join(evidenceDir, "intervention.md");
 const records = readJsonl(toolCallsPath);
 const index = readJson(evidenceIndexPath);
 const memories = readJson(memoryPath);
@@ -437,6 +452,8 @@ const failureDiagnosisFile = readJson(failureDiagnosisPath);
 const failureDiagnosisEvents = readJsonl(failureDiagnosisEventsPath);
 const rerunPlan = readFileSync(rerunPlanPath, "utf8");
 const rerunContextFile = readFileSync(rerunContextPath, "utf8");
+const interventionJson = readJson(interventionJsonPath);
+const interventionMarkdown = readFileSync(interventionMarkdownPath, "utf8");
 const retrievedDetails = retrieved.details;
 const staleDetails = staleRetrieved.details;
 const guardDetails = guard.details;
@@ -446,6 +463,7 @@ const validContractDetails = validContract.details;
 const incompleteContractDetails = incompleteContract.details;
 const failureDiagnosisDetails = failureDiagnosis.details;
 const rerunContextDetails = rerunContext.details;
+const interventionDetails = intervention.details;
 const importedDetails = imported.details;
 const importedMilpDetails = importedMilpRetrieved.details;
 const importedPaper09Details = importedPaper09Retrieved.details;
@@ -491,6 +509,17 @@ const summary = {
     && rerunContextFile.includes("Status: `needs_rerun`")
     && rerunContextFile.includes("candidate_statistical_noise")
     && rerunContextFile.includes("## Required Rerun Discipline")
+    && interventionDetails.schema === "nss_evimem.online_intervention.v1"
+    && interventionDetails.status === "active_intervention"
+    && interventionDetails.intervention_mode === "online_repair_prompt"
+    && interventionDetails.output_files.intervention_json === interventionJsonPath
+    && interventionDetails.output_files.intervention_markdown === interventionMarkdownPath
+    && interventionDetails.prompt_patch.includes("Do not claim a verified final answer")
+    && interventionDetails.blocked_claims.some((claim) => claim.includes("verified"))
+    && interventionDetails.required_actions.includes("Run a bounded staged rerun before finalizing.")
+    && interventionJson.schema === "nss_evimem.online_intervention.v1"
+    && interventionMarkdown.includes("# NSS-EviMem Online Repair Intervention")
+    && interventionMarkdown.includes("## Prompt Patch")
     && importedDetails.imported === 3
     && importedDetails.total_memory_records === 4
     && importedMilpDetails.accepted.length >= 1
@@ -516,6 +545,8 @@ const summary = {
     failure_diagnosis_events: failureDiagnosisEventsPath,
     rerun_plan: rerunPlanPath,
     rerun_context: rerunContextPath,
+    intervention_json: interventionJsonPath,
+    intervention_markdown: interventionMarkdownPath,
   },
   memory: promoted.details,
   retrieval: retrieved.details,
@@ -527,6 +558,7 @@ const summary = {
   incomplete_contract: incompleteContract.details,
   failure_diagnosis: failureDiagnosis.details,
   rerun_context: rerunContext.details,
+  intervention: intervention.details,
   imported_memory_pack: imported.details,
   imported_milp_retrieval: importedMilpRetrieved.details,
   imported_paper09_retrieval: importedPaper09Retrieved.details,

@@ -161,7 +161,7 @@ So the current conclusion is about trustworthiness and recovery traceability, no
 ## Limitations
 
 - This is a single-case dataset view, not a multi-case benchmark.
-- Direction A is post-hoc dataset construction from existing artifacts; it is not yet online intervention during the agent's reasoning loop.
+- Direction A is post-hoc dataset construction from existing artifacts; online intervention is handled separately by the plugin-level `nss_evimem_build_intervention` tool.
 - The case demonstrates failure diagnosis and rerun context more strongly than long-term EvidenceMemory retrieval.
 - The H-group mapping is practical rather than perfectly controlled, because the three arms come from real local OpenClaw runs rather than a fully isolated randomized experiment.
 - Generated `runs/` artifacts are local and intentionally ignored by Git.
@@ -179,6 +179,20 @@ All experiment outputs are written under `runs/`:
 
 These directories are ignored by Git because they contain local evaluation artifacts, model outputs, logs, and oracle-derived labels.
 
-## Next Step
+## Direction B1
 
-The natural next step is Direction B: move from post-hoc failure-case dataset construction to online intervention. In Direction B, the plugin should inject failure diagnosis and rerun context during the live OpenClaw loop so that the agent can repair a wrong or overclaimed answer while it is still working.
+Direction B1 adds a plugin-level online repair intervention builder:
+
+```text
+nss_evimem_build_intervention
+```
+
+It reads the current `failure_diagnosis.json`, `rerun_plan.md`, task contract, tool capability registry, and evidence records, then writes:
+
+- `intervention.json`
+- `intervention.md`
+- a `prompt_patch` field for the next Agent turn
+
+This still stays within the plugin boundary. It does not solve the cryptanalysis task and does not modify OpenClaw internals directly. It gives the Agent or experiment harness an auditable prompt patch that blocks unsupported verified claims, requires bounded reruns, and forces an explicit evidence boundary.
+
+The next research step after B1 is to wire this intervention bundle into a real live OpenClaw pass and compare whether the Agent follows the prompt patch more reliably than the previous rerun-context-only setup.

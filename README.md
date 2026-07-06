@@ -16,6 +16,7 @@ This package intentionally does not include cryptanalysis tools, OCP/MILP code, 
 - Tool Capability Registry: stores structured external-tool capability declarations in `tool_capabilities.json`.
 - Task Contract validation: validates Agent-generated candidate contracts and persists valid session contracts in `task_contract.json`.
 - Failure diagnosis and rerun planning: writes `failure_diagnosis.json`, `failure_diagnosis_events.jsonl`, and `rerun_plan.md` when a run is incomplete, noisy, timed out, mismatched, or overclaiming.
+- Online repair intervention: converts a diagnosis and rerun plan into `intervention.json`, `intervention.md`, and a prompt patch the Agent can use in the next turn.
 
 ## Install and Build
 
@@ -45,6 +46,8 @@ nss_evimem_register_tool_capability
 nss_evimem_list_tool_capabilities
 nss_evimem_validate_contract
 nss_evimem_diagnose_failure
+nss_evimem_build_rerun_context
+nss_evimem_build_intervention
 ```
 
 ## Helper Tools
@@ -171,6 +174,59 @@ Outputs:
 - `failure_diagnosis.json`: latest structured diagnosis.
 - `failure_diagnosis_events.jsonl`: append-only diagnosis history.
 - `rerun_plan.md`: human-readable rerun checklist for the next Agent turn.
+
+### `nss_evimem_build_rerun_context`
+
+Builds a compact rerun context from an existing `failure_diagnosis.json`, `rerun_plan.md`, current task contract, tool capability registry, and evidence summary. This is useful when starting a fresh OpenClaw pass from the previous failure boundary.
+
+Input:
+
+```json
+{
+  "case_id": "CBSC-V2-HARD-SIMON32-DL-SEARCH-002",
+  "prior_result_summary": {
+    "pass": "plugin_pass1",
+    "final_correctness": "partially_correct_or_insufficient",
+    "evidence_completeness": "complete_or_structured"
+  },
+  "evidence_dir": "C:/tmp/nss-evimem-session"
+}
+```
+
+Outputs:
+
+- `rerun_context.md`: markdown context for a bounded rerun.
+- `prompt_patch`: compact text telling the Agent not to claim success unless the rerun checklist is satisfied.
+
+### `nss_evimem_build_intervention`
+
+Builds an online repair intervention from the current failure diagnosis and rerun plan. This tool stays inside the plugin boundary: it does not solve the cryptanalysis task, mutate OpenClaw internals, or execute tools. It returns a structured intervention that the Agent or experiment harness can inject into the next prompt.
+
+Input:
+
+```json
+{
+  "case_id": "CBSC-V2-HARD-SIMON32-DL-SEARCH-002",
+  "intervention_mode": "online_repair_prompt",
+  "prior_result_summary": {
+    "pass": "plugin_pass1",
+    "final_correctness": "partially_correct_or_insufficient",
+    "evidence_completeness": "complete_or_structured"
+  },
+  "evidence_dir": "C:/tmp/nss-evimem-session"
+}
+```
+
+Modes:
+
+- `online_repair_prompt`: require a bounded rerun, matching tool capability, fresh evidence, and a final diagnosis before answering.
+- `report_boundary_prompt`: rewrite the final report boundary when the main issue is unsafe claim wording.
+
+Outputs:
+
+- `intervention.json`: structured intervention with blocked claims, required actions, evidence requirements, report boundaries, and output paths.
+- `intervention.md`: human-readable intervention bundle.
+- `prompt_patch`: text that can be inserted into the next Agent turn.
 
 ### `nss_evimem_import_pack`
 
