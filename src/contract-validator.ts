@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { capabilityFieldMatches, capabilitySupportsContractFields } from "./capability-matcher.js";
 import { getEvidenceDir, isRecord, stableStringify, utcNow } from "./evidence-store.js";
 import { readToolCapabilityRegistry } from "./tool-capability-registry.js";
 import type {
@@ -122,11 +123,8 @@ function findMatchingTools(evidenceDir: string, contract: TaskContract): string[
 
 function capabilitySupportsContract(record: ToolCapabilityRecord, contract: TaskContract): boolean {
   const capability = record.capability;
-  for (const field of ["domain", "analysis_type", "method", "scope"]) {
-    const expected = contract[field];
-    if (!isMissing(expected) && !valueMatches(capability[field], expected)) {
-      return false;
-    }
+  if (!capabilitySupportsContractFields(capability, contract, ["domain", "analysis_type", "method", "scope"])) {
+    return false;
   }
 
   if (!isMissing(contract.objective) && !objectiveMatches(capability, String(contract.objective))) {
@@ -148,6 +146,7 @@ function objectiveMatches(capability: JsonRecord, objective: string): boolean {
     valueMatches(capability.objective, objective)
     || valueMatches(capability.claim_type, objective)
     || valueMatches(capability.claim_types, objective)
+    || capabilityFieldMatches(capability, "objective", objective)
   );
 }
 

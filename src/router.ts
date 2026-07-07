@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
+import { capabilityFieldMatches, formatCapabilityFieldValue } from "./capability-matcher.js";
 import { getEvidenceDir, stableStringify, utcNow } from "./evidence-store.js";
 import type {
   GuardDecision,
@@ -23,9 +24,8 @@ export function mismatchReasons(
     if (expected === undefined || expected === null) {
       continue;
     }
-    const actual = toolCapability[key];
-    if (stableStringify(actual) !== stableStringify(expected)) {
-      reasons.push(`${key}=${String(actual)} expected=${String(expected)}`);
+    if (!capabilityFieldMatches(toolCapability, key, expected)) {
+      reasons.push(`${key}=${formatCapabilityFieldValue(toolCapability, key)} expected=${String(expected)}`);
     }
   }
   return reasons;

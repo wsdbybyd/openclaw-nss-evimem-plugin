@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "smoke": "node scripts/smoke.mjs",
+    "verify:capability-matching": "npm run build && node scripts/verify-capability-matching.mjs",
     "case:cbsc-simon32-dl": "node cases/CBSC-V2-HARD-SIMON32-DL-SEARCH-002/run_openclaw_case.mjs",
     "case:cbsc-simon32-dl:evaluate": "node cases/CBSC-V2-HARD-SIMON32-DL-SEARCH-002/evaluate_case.mjs",
     "case:cbsc-simon32-dl:verify": "node cases/CBSC-V2-HARD-SIMON32-DL-SEARCH-002/verify_case.mjs",
