@@ -129,6 +129,12 @@ Run a real local OpenClaw intervention-prompt experiment seeded from `runs/openc
 npm run experiment:cbsc-simon32-dl:openclaw-intervention:all
 ```
 
+Analyze whether the intervention-prompt arm actually complied with the B1 intervention:
+
+```powershell
+npm run experiment:cbsc-simon32-dl:intervention-compliance:all
+```
+
 Build and verify the Direction A failure-case dataset:
 
 ```powershell
@@ -247,3 +253,24 @@ The current local B2 run shows:
 - intervention arm overclaiming detected: `false`.
 
 So B2 currently supports the narrower claim-boundary correction result, not a full correction-to-verified-answer result.
+
+## B2 Compliance Analysis
+
+The compliance analyzer is a local post-processing step for `runs/openclaw-real-intervention-latest/`.
+It reads the intervention prompt, final answer, intervention use report, evidence records, guard events, failure diagnosis, and bounded rerun artifacts, then writes:
+
+| File | Purpose |
+|---|---|
+| `intervention_compliance.json` | Machine-readable scorecard for intervention use, blocked-claim handling, required actions, evidence requirements, and final claim boundary. |
+| `intervention_compliance_report.md` | Human-readable compliance report with group scores and evidence notes. |
+
+The possible classifications are:
+
+| Classification | Meaning |
+|---|---|
+| `verified_correct` | The intervention arm produced an oracle-aligned answer with complete evidence. |
+| `compliant_bounded_failure` | The agent followed the intervention and correctly downgraded the result to a bounded failure. |
+| `partially_compliant` | The agent followed part of the intervention, but evidence or action requirements remain incomplete. |
+| `non_compliant` | The intervention was not followed or the final answer overclaimed unsupported results. |
+
+For the current local run, the expected strongest claim is `compliant_bounded_failure`, not `verified_correct`.

@@ -351,6 +351,18 @@ rerun_plan.md
 - `NSS_EVIMEM_EVIDENCE_DIR`: explicit evidence output directory.
 - `NSS_EVIMEM_SESSION_ID`: fallback session id if OpenClaw context does not provide one.
 
+## Experiment Helper Scripts
+
+The plugin repository also includes local helper scripts for the `CBSC-V2-HARD-SIMON32-DL-SEARCH-002` case. These scripts are source-controlled, but their generated `runs/` outputs are ignored by Git.
+
+To analyze whether a completed B2 OpenClaw intervention run actually followed the B1 prompt intervention, run:
+
+```powershell
+npm run experiment:cbsc-simon32-dl:intervention-compliance:all
+```
+
+This reads `experiments/CBSC-V2-HARD-SIMON32-DL-SEARCH-002/runs/openclaw-real-intervention-latest/` and writes local-only `intervention_compliance.json` and `intervention_compliance_report.md` files. The strongest expected label for the current case is `compliant_bounded_failure`, not `verified_correct`.
+
 ## Smoke Test
 
 ```powershell
