@@ -75,7 +75,7 @@ Input:
 
 Records are stored in `tool_capabilities.json`. Existing records with the same `tool_name` are replaced unless `replace_existing` is set to `false`.
 
-Capability matching accepts both flat declarations such as `method` and structured declarations such as `methods`, `analysis_types`, `parameters.nrounds`, phase scopes, and descriptive text. This lets an Agent register a realistic executable tool capability without forcing every field into the exact Task Contract shape.
+Capability matching accepts both flat declarations such as `method` and structured declarations such as `methods`, `analysis_types`, `parameters.nrounds`, phase scopes, deliverable/output descriptions, and descriptive text. This lets an Agent register a realistic executable tool capability without forcing every field into the exact Task Contract shape.
 
 ### `nss_evimem_list_tool_capabilities`
 

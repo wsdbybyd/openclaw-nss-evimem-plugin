@@ -53,11 +53,14 @@ const taskContract = {
   },
   deliverables: [
     "executable code",
+    "run log with exit status and timing",
+    "machine-readable result JSON",
     "input difference",
     "output linear mask",
     "round split",
     "correlation/weight",
     "verification",
+    "final report",
   ],
 };
 
@@ -99,6 +102,20 @@ const boundedRerunCapability = {
     weight: "float (-log2|corr|)",
     verification_status: "verified|candidate|bounded_failure",
   },
+  output_files: [
+    "simon32_dl_bounded_rerun.py",
+    "result.json",
+    "run_log.txt",
+    "final_answer.md",
+  ],
+  output_artifacts: [
+    "input_difference (hex 16-bit)",
+    "output_linear_mask (hex 16-bit)",
+    "round_split (rd + rl = 14)",
+    "empirical_correlation (float in [-1,1])",
+    "empirical_weight (float, -2*log2|corr|)",
+    "multi_key_verification_results (array of {key, correlation, weight})",
+  ],
   hard_limits: {
     max_runtime_seconds: 120,
     fwht_samples_max: 65536,
@@ -128,7 +145,7 @@ const guardFromRegisteredRecord = decideGuardRoute({
   guard_mode: "post_repair",
   task_contract: taskContract,
   tool_capability: registeredCapability,
-  compare_fields: ["method", "analysis_type", "domain", "scope"],
+  compare_fields: ["method", "analysis_type", "domain", "scope", "deliverables"],
 });
 
 const guardFromNestedCapability = decideGuardRoute({
@@ -139,7 +156,7 @@ const guardFromNestedCapability = decideGuardRoute({
     tool_name: "simon32_dl_search",
     capability: boundedRerunCapability,
   },
-  compare_fields: ["method", "analysis_type", "domain", "scope"],
+  compare_fields: ["method", "analysis_type", "domain", "scope", "deliverables"],
 });
 
 const hardMismatch = decideGuardRoute({

@@ -65,6 +65,8 @@ const checks = {
   interventionUsed: intervention.intervention_used === true,
   comparisonPresent: summary.comparison?.intervention_prompt_built === true,
   promptRequestsIntervention: /nss_evimem_build_intervention/i.test(prompt),
+  promptAlignsValidateAndGuard: /same task contract that `nss_evimem_validate_contract` accepted/i.test(prompt)
+    && /method, analysis_type, domain, scope, target, and deliverables/i.test(prompt),
   interventionSchema: interventionJson.schema === "nss_evimem.online_intervention.v1",
   promptPatchBoundary: /Do not claim a verified final answer/i.test(interventionJson.prompt_patch),
   markdownLooksUseful: /NSS-EviMem Online Repair Intervention/i.test(interventionMarkdown)

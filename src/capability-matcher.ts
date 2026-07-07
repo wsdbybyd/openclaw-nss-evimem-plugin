@@ -4,6 +4,7 @@ import type { JsonRecord, TaskContract, ToolCapability } from "./types.js";
 const FIELD_ALIASES: Record<string, string[]> = {
   analysis_type: ["analysis_type", "analysis_types", "type", "types"],
   cipher: ["cipher", "ciphers", "application", "applications"],
+  deliverables: ["deliverables", "produced_artifacts", "artifacts", "output", "outputs", "output_artifacts", "output_files", "files"],
   domain: ["domain", "domains"],
   method: ["method", "methods"],
   objective: ["objective", "objectives", "claim_type", "claim_types"],
@@ -52,6 +53,10 @@ export function capabilityFieldMatches(capabilityLike: ToolCapability, field: st
   }
 
   const capability = unwrapCapability(capabilityLike);
+  if (field === "deliverables") {
+    return deliverablesMatch(capability, expected);
+  }
+
   const directValues = collectFieldCandidates(capability, field);
   if (directValues.some((value) => semanticValueMatches(value, expected, field))) {
     return true;
@@ -121,6 +126,10 @@ function collectValuesByKey(value: unknown, keys: Set<string>, out: unknown[]): 
 }
 
 function semanticValueMatches(actual: unknown, expected: unknown, field: string): boolean {
+  if (Array.isArray(expected)) {
+    return expected.every((item) => semanticValueMatches(actual, item, field));
+  }
+
   if (Array.isArray(actual)) {
     return actual.some((item) => semanticValueMatches(item, expected, field));
   }
@@ -139,6 +148,75 @@ function semanticValueMatches(actual: unknown, expected: unknown, field: string)
   }
 
   return semanticTextMatches(actualText, expected, field);
+}
+
+function deliverablesMatch(capability: JsonRecord, expected: unknown): boolean {
+  if (!Array.isArray(expected)) {
+    return capabilityFieldMatches(capability, "objective", expected);
+  }
+
+  const corpus = normalizeText(stableStringify(capability));
+  return expected.every((item) => singleDeliverableMatches(corpus, item));
+}
+
+function singleDeliverableMatches(corpus: string, expected: unknown): boolean {
+  const text = normalizeText(expected);
+  if (text.length === 0) {
+    return true;
+  }
+
+  if (text.includes("executable") && text.includes("code")) {
+    return corpus.includes("executable")
+      || corpus.includes("python")
+      || corpus.includes("script")
+      || corpus.includes(" py")
+      || corpus.includes(" bounded search");
+  }
+
+  if (text.includes("input") && text.includes("difference")) {
+    return corpus.includes("input difference") || corpus.includes("input diff") || corpus.includes("input_difference");
+  }
+
+  if (text.includes("output") && text.includes("mask")) {
+    return corpus.includes("output linear mask")
+      || corpus.includes("output mask")
+      || corpus.includes("linear mask")
+      || corpus.includes("output_linear_mask");
+  }
+
+  if (text.includes("round") && text.includes("split")) {
+    return (corpus.includes("round") || corpus.includes("nrounds"))
+      && (corpus.includes("phase") || corpus.includes("trail") || corpus.includes("differential") || corpus.includes("linear"));
+  }
+
+  if (text.includes("correlation") && text.includes("weight")) {
+    return corpus.includes("correlation") && corpus.includes("weight");
+  }
+
+  if (text.includes("run") && text.includes("log")) {
+    return corpus.includes("run log") || corpus.includes("run_log");
+  }
+
+  if (text.includes("result") && text.includes("json")) {
+    return corpus.includes("result json")
+      || (corpus.includes("result") && corpus.includes("json"));
+  }
+
+  if (text.includes("final") && text.includes("report")) {
+    return corpus.includes("final report")
+      || corpus.includes("final_report")
+      || corpus.includes("final answer")
+      || corpus.includes("final_answer");
+  }
+
+  if (text.includes("verification")) {
+    return corpus.includes("verification")
+      || corpus.includes("verify")
+      || corpus.includes("multi key")
+      || corpus.includes("nkeys");
+  }
+
+  return semanticTextMatches(corpus, expected, "objective");
 }
 
 function semanticTextMatches(corpus: string, expected: unknown, field: string): boolean {
