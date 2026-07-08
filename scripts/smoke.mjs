@@ -219,6 +219,7 @@ const requiredTools = [
   "nss_evimem_register_tool_capability",
   "nss_evimem_list_tool_capabilities",
   "nss_evimem_validate_contract",
+  "nss_evimem_validate_artifact_claims",
   "nss_evimem_diagnose_failure",
   "nss_evimem_build_rerun_context",
   "nss_evimem_build_intervention",
@@ -268,6 +269,7 @@ const importTool = tools.get("nss_evimem_import_pack");
 const registerCapabilityTool = tools.get("nss_evimem_register_tool_capability");
 const listCapabilitiesTool = tools.get("nss_evimem_list_tool_capabilities");
 const validateContractTool = tools.get("nss_evimem_validate_contract");
+const validateArtifactClaimsTool = tools.get("nss_evimem_validate_artifact_claims");
 const diagnoseFailureTool = tools.get("nss_evimem_diagnose_failure");
 const buildRerunContextTool = tools.get("nss_evimem_build_rerun_context");
 const buildInterventionTool = tools.get("nss_evimem_build_intervention");
@@ -354,6 +356,49 @@ const incompleteContract = await validateContractTool.execute("contract-incomple
   evidence_dir: evidenceDir,
 });
 
+const badSimonSourcePath = join(artifactsDir, "bad_simon.py");
+writeFileSync(badSimonSourcePath, [
+  "def generate_round_keys():",
+  "    c = 3",
+  "    return [0] * 32",
+  "",
+  "def simon_encrypt_r_rounds_vec(plaintexts, round_keys, r):",
+  "    L = plaintexts",
+  "    f = plaintexts",
+  "    new_R = L ^ f",
+  "    return new_R",
+  "",
+].join("\n"), "utf8");
+
+const badSimonResultPath = join(artifactsDir, "bad_simon_result.json");
+writeJson(badSimonResultPath, {
+  status: "bounded_search_complete_no_distinguisher",
+  conclusion: "No verified 14-round DL distinguisher.",
+  total_time_s: 1783414135.26,
+  multikey: {
+    input_diff: "0x400",
+    output_mask: "0x8000",
+    distinguishable: true,
+  },
+});
+
+const artifactClaimValidation = await validateArtifactClaimsTool.execute("artifact-claims-1", {
+  case_id: "CBSC-V2-HARD-SIMON32-DL-SEARCH-002",
+  task_contract: {
+    domain: "symmetric_cryptanalysis",
+    cipher: "Simon32/64",
+    rounds: 14,
+    analysis_type: "differential_linear",
+    method: "script_search",
+    objective: "verified_14_round_dl_distinguisher",
+    scope: "full_cipher",
+  },
+  result_path: badSimonResultPath,
+  source_paths: [badSimonSourcePath],
+  report_text: "No verified distinguisher. Candidate Delta=0x400, Gamma=0x8000.",
+  evidence_dir: evidenceDir,
+});
+
 const failureDiagnosis = await diagnoseFailureTool.execute("failure-diagnosis-1", {
   case_id: "CBSC-V2-HARD-SIMON32-DL-SEARCH-002",
   task_contract: {
@@ -435,6 +480,8 @@ const guardEventsPath = join(evidenceDir, "tool_guard_events.jsonl");
 const capabilityRegistryPath = join(evidenceDir, "tool_capabilities.json");
 const contractStorePath = join(evidenceDir, "task_contract.json");
 const contractEventsPath = join(evidenceDir, "contract_validation_events.jsonl");
+const artifactClaimValidationPath = join(evidenceDir, "artifact_claim_validation.json");
+const artifactClaimValidationEventsPath = join(evidenceDir, "artifact_claim_validation_events.jsonl");
 const failureDiagnosisPath = join(evidenceDir, "failure_diagnosis.json");
 const failureDiagnosisEventsPath = join(evidenceDir, "failure_diagnosis_events.jsonl");
 const rerunPlanPath = join(evidenceDir, "rerun_plan.md");
@@ -448,6 +495,8 @@ const guardEvents = readJsonl(guardEventsPath);
 const capabilityRegistry = readJson(capabilityRegistryPath);
 const storedContract = readJson(contractStorePath);
 const contractEvents = readJsonl(contractEventsPath);
+const artifactClaimValidationFile = readJson(artifactClaimValidationPath);
+const artifactClaimValidationEvents = readJsonl(artifactClaimValidationEventsPath);
 const failureDiagnosisFile = readJson(failureDiagnosisPath);
 const failureDiagnosisEvents = readJsonl(failureDiagnosisEventsPath);
 const rerunPlan = readFileSync(rerunPlanPath, "utf8");
@@ -461,6 +510,7 @@ const capabilityRegistrationDetails = capabilityRegistration.details;
 const listedCapabilitiesDetails = listedCapabilities.details;
 const validContractDetails = validContract.details;
 const incompleteContractDetails = incompleteContract.details;
+const artifactClaimValidationDetails = artifactClaimValidation.details;
 const failureDiagnosisDetails = failureDiagnosis.details;
 const rerunContextDetails = rerunContext.details;
 const interventionDetails = intervention.details;
@@ -492,10 +542,23 @@ const summary = {
     && storedContract.cipher === "Simon32/64"
     && incompleteContractDetails.status === "incomplete_contract"
     && incompleteContractDetails.missing_fields.includes("analysis_type")
+    && artifactClaimValidationDetails.ok === false
+    && artifactClaimValidationDetails.supports_verified_claim === false
+    && artifactClaimValidationDetails.status === "failed"
+    && artifactClaimValidationDetails.checks.some((check) => check.id === "simon32_round_function_uses_key" && check.status === "fail")
+    && artifactClaimValidationDetails.checks.some((check) => check.id === "simon32_key_schedule_constant" && check.status === "fail")
+    && artifactClaimValidationDetails.checks.some((check) => check.id === "simon32_full_state_pair" && check.status === "fail")
+    && artifactClaimValidationDetails.checks.some((check) => check.id === "simon32_required_decompositions" && check.status === "fail")
+    && artifactClaimValidationDetails.checks.some((check) => check.id === "dl_signed_sum_measurement" && check.status === "fail")
+    && artifactClaimValidationDetails.checks.some((check) => check.id === "result_claim_consistency" && check.status === "fail")
+    && artifactClaimValidationDetails.checks.some((check) => check.id === "runtime_duration_sane" && check.status === "fail")
+    && artifactClaimValidationFile.schema === "nss_evimem.artifact_claim_validation.v1"
+    && artifactClaimValidationEvents.length === 1
     && contractEvents.length === 2
     && failureDiagnosisDetails.status === "needs_rerun"
     && failureDiagnosisDetails.failure_types.includes("search_timeout")
     && failureDiagnosisDetails.failure_types.includes("candidate_statistical_noise")
+    && failureDiagnosisDetails.failure_types.includes("artifact_claim_invalid")
     && failureDiagnosisDetails.failure_types.includes("oracle_mismatch")
     && failureDiagnosisDetails.failure_types.includes("insufficient_evidence")
     && failureDiagnosisDetails.output_files.failure_diagnosis === failureDiagnosisPath
@@ -541,6 +604,8 @@ const summary = {
     tool_capabilities: capabilityRegistryPath,
     task_contract: contractStorePath,
     contract_validation_events: contractEventsPath,
+    artifact_claim_validation: artifactClaimValidationPath,
+    artifact_claim_validation_events: artifactClaimValidationEventsPath,
     failure_diagnosis: failureDiagnosisPath,
     failure_diagnosis_events: failureDiagnosisEventsPath,
     rerun_plan: rerunPlanPath,
@@ -556,6 +621,7 @@ const summary = {
   listed_capabilities: listedCapabilities.details,
   valid_contract: validContract.details,
   incomplete_contract: incompleteContract.details,
+  artifact_claim_validation: artifactClaimValidation.details,
   failure_diagnosis: failureDiagnosis.details,
   rerun_context: rerunContext.details,
   intervention: intervention.details,

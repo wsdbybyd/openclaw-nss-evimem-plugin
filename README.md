@@ -15,6 +15,7 @@ This package intentionally does not include cryptanalysis tools, OCP/MILP code, 
 - Generic guard decisions: compares a task contract with a tool capability and records block, redirect, post-check, or post-repair decisions in `tool_guard_events.jsonl`.
 - Tool Capability Registry: stores structured external-tool capability declarations in `tool_capabilities.json`.
 - Task Contract validation: validates Agent-generated candidate contracts and persists valid session contracts in `task_contract.json`.
+- Artifact claim validation: checks whether produced result/code/report artifacts can support a verified claim, including case-specific checks for known benchmarks.
 - Failure diagnosis and rerun planning: writes `failure_diagnosis.json`, `failure_diagnosis_events.jsonl`, and `rerun_plan.md` when a run is incomplete, noisy, timed out, mismatched, or overclaiming.
 - Online repair intervention: converts a diagnosis and rerun plan into `intervention.json`, `intervention.md`, and a prompt patch the Agent can use in the next turn.
 
@@ -45,6 +46,7 @@ nss_evimem_import_pack
 nss_evimem_register_tool_capability
 nss_evimem_list_tool_capabilities
 nss_evimem_validate_contract
+nss_evimem_validate_artifact_claims
 nss_evimem_diagnose_failure
 nss_evimem_build_rerun_context
 nss_evimem_build_intervention
@@ -123,6 +125,46 @@ Possible statuses:
 
 Each validation is appended to `contract_validation_events.jsonl`. Valid contracts are saved as `task_contract.json` by default; pass `save_as_current: false` to validate without updating the session contract.
 
+### `nss_evimem_validate_artifact_claims`
+
+Validates whether produced artifacts can support a verified cryptanalysis claim. This tool does not solve the task and does not compare against hidden oracle answers. It checks artifact/report consistency and can apply public, case-aware verifier rules for known benchmark cases.
+
+Input:
+
+```json
+{
+  "case_id": "CBSC-V2-HARD-SIMON32-DL-SEARCH-002",
+  "task_contract": {
+    "domain": "symmetric_cryptanalysis",
+    "cipher": "Simon32/64",
+    "rounds": 14,
+    "analysis_type": "differential_linear",
+    "method": "script_search",
+    "objective": "verified_14_round_dl_distinguisher",
+    "scope": "full_cipher"
+  },
+  "result_path": "C:/tmp/run_result.json",
+  "source_paths": ["C:/tmp/simon32_search.py"],
+  "report_path": "C:/tmp/final_answer.md",
+  "evidence_dir": "C:/tmp/nss-evimem-session"
+}
+```
+
+For the current Simon32/64 DL benchmark, the checker requires artifacts to show:
+
+- Simon32/64 rounds xoring the round key.
+- Simon32/64 key schedule constant `c=0xfffc`.
+- Full 32-bit/two-word `Delta_in` and `Gamma_out` reporting.
+- Explicit discussion or comparison of `(5,5,4)`, `(5,6,3)`, and `(7,3,4)`.
+- Signed-sum or equivalent DL correlation measurement.
+- No contradiction such as `distinguishable=true` while the same artifact says no verified distinguisher.
+- Runtime fields that look like elapsed seconds rather than timestamps.
+
+Outputs:
+
+- `artifact_claim_validation.json`: latest validation result.
+- `artifact_claim_validation_events.jsonl`: append-only validation history.
+
 ### `nss_evimem_diagnose_failure`
 
 Generates a structured diagnosis and rerun plan from the current evidence directory plus an optional run summary. This tool does not solve the cryptanalysis task and does not execute reruns; it gives the Agent an auditable failure classification and a bounded next-run checklist.
@@ -164,6 +206,7 @@ Detected failure types include:
 
 - `search_timeout`
 - `candidate_statistical_noise`
+- `artifact_claim_invalid`
 - `oracle_mismatch`
 - `insufficient_evidence`
 - `task_contract_unvalidated`
@@ -343,6 +386,8 @@ tool_guard_events.jsonl
 tool_capabilities.json
 task_contract.json
 contract_validation_events.jsonl
+artifact_claim_validation.json
+artifact_claim_validation_events.jsonl
 failure_diagnosis.json
 failure_diagnosis_events.jsonl
 rerun_plan.md

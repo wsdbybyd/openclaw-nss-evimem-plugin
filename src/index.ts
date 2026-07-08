@@ -1,4 +1,5 @@
 import { getCallId, isRecord, recordToolEvidence, stableStringify, utcNow } from "./evidence-store.js";
+import { validateArtifactClaims } from "./artifact-claim-validator.js";
 import { diagnoseFailure } from "./failure-diagnosis.js";
 import { buildIntervention } from "./intervention-builder.js";
 import { buildRerunContext } from "./rerun-context.js";
@@ -104,6 +105,7 @@ function registerHelperTools(api: PluginApi): void {
     createRegisterToolCapabilityTool(),
     createListToolCapabilitiesTool(),
     createValidateContractTool(),
+    createValidateArtifactClaimsTool(),
     createDiagnoseFailureTool(),
     createBuildRerunContextTool(),
     createBuildInterventionTool(),
@@ -327,6 +329,42 @@ function createValidateContractTool(): AnyAgentTool {
         supported_scopes: optionalStringArray(params.supported_scopes),
         require_matching_tool: optionalBoolean(params.require_matching_tool),
         save_as_current: optionalBoolean(params.save_as_current),
+        evidence_dir: optionalString(params.evidence_dir),
+      });
+      return jsonToolResult(result);
+    },
+  };
+}
+
+function createValidateArtifactClaimsTool(): AnyAgentTool {
+  return {
+    name: "nss_evimem_validate_artifact_claims",
+    label: "Validate Artifact Claims",
+    description: "Validate whether produced artifacts can support a verified cryptanalysis claim, including case-specific checks for known benchmark tasks.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        case_id: { type: "string" },
+        task_contract: { type: "object" },
+        result: { type: "object" },
+        result_path: { type: "string" },
+        report_text: { type: "string" },
+        report_path: { type: "string" },
+        source_paths: { type: "array", items: { type: "string" } },
+        evidence_dir: { type: "string" },
+      },
+    },
+    async execute(_toolCallId: string, rawParams: unknown): Promise<AgentToolResult> {
+      const params = rawParams === undefined ? {} : requireRecord(rawParams);
+      const result = validateArtifactClaims({
+        case_id: optionalString(params.case_id),
+        task_contract: isRecord(params.task_contract) ? params.task_contract : undefined,
+        result: isRecord(params.result) ? params.result : undefined,
+        result_path: optionalString(params.result_path),
+        report_text: optionalString(params.report_text),
+        report_path: optionalString(params.report_path),
+        source_paths: optionalStringArray(params.source_paths),
         evidence_dir: optionalString(params.evidence_dir),
       });
       return jsonToolResult(result);

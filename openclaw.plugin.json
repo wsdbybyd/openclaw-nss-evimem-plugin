@@ -1,7 +1,7 @@
 {
   "id": "openclaw-nss-evimem-plugin",
   "name": "OpenClaw NSS-EviMem",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Generic OpenClaw hook plugin for evidence capture, evidence-backed memory, and tool-governance decisions.",
   "enabledByDefault": false,
   "activation": {
@@ -20,6 +20,7 @@
       "nss_evimem_register_tool_capability",
       "nss_evimem_list_tool_capabilities",
       "nss_evimem_validate_contract",
+      "nss_evimem_validate_artifact_claims",
       "nss_evimem_diagnose_failure",
       "nss_evimem_build_rerun_context",
       "nss_evimem_build_intervention"

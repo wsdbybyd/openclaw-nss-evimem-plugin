@@ -10,6 +10,7 @@ export type FailureType =
   | "candidate_statistical_noise"
   | "oracle_mismatch"
   | "insufficient_evidence"
+  | "artifact_claim_invalid"
   | "task_contract_unvalidated"
   | "tool_capability_missing"
   | "tool_contract_mismatch"
@@ -36,6 +37,7 @@ export type FailureDiagnosis = {
     registered_tools: string[];
     valid_contract_recorded: boolean;
     guard_events_recorded: number;
+    artifact_claim_validation_status: string | null;
   };
   output_files: {
     failure_diagnosis: string;
@@ -61,6 +63,7 @@ export function diagnoseFailure(params: {
   const evidenceRecords = readEvidenceRecords(evidenceDir);
   const contractEvents = readJsonl(join(evidenceDir, "contract_validation_events.jsonl"));
   const guardEvents = readJsonl(join(evidenceDir, "tool_guard_events.jsonl"));
+  const artifactClaimValidation = readJsonIfRecord(join(evidenceDir, "artifact_claim_validation.json"));
   const registry = readToolCapabilityRegistry(evidenceDir);
 
   const failureTypes = detectFailureTypes({
@@ -70,9 +73,10 @@ export function diagnoseFailure(params: {
     evidenceRecords,
     contractEvents,
     guardEvents,
+    artifactClaimValidation,
     registeredToolNames: Object.keys(registry),
   });
-  const reasons = buildReasons(failureTypes, runSummary, observations);
+  const reasons = buildReasons(failureTypes, runSummary, observations, artifactClaimValidation);
   const diagnosisPath = join(evidenceDir, "failure_diagnosis.json");
   const diagnosisEventsPath = join(evidenceDir, "failure_diagnosis_events.jsonl");
   const rerunPlanPath = join(evidenceDir, "rerun_plan.md");
@@ -94,6 +98,9 @@ export function diagnoseFailure(params: {
       registered_tools: Object.keys(registry).sort(),
       valid_contract_recorded: hasValidContractEvent(contractEvents),
       guard_events_recorded: guardEvents.length,
+      artifact_claim_validation_status: typeof artifactClaimValidation?.status === "string"
+        ? artifactClaimValidation.status
+        : null,
     },
     output_files: {
       failure_diagnosis: diagnosisPath,
@@ -115,6 +122,7 @@ function detectFailureTypes(params: {
   evidenceRecords: JsonRecord[];
   contractEvents: JsonRecord[];
   guardEvents: JsonRecord[];
+  artifactClaimValidation: JsonRecord | null;
   registeredToolNames: string[];
 }): FailureType[] {
   const failures = new Set<FailureType>();
@@ -132,6 +140,9 @@ function detectFailureTypes(params: {
   if (evidenceIsInsufficient(params.runSummary, params.evidenceRecords)) {
     failures.add("insufficient_evidence");
   }
+  if (artifactClaimValidationFailed(params.artifactClaimValidation)) {
+    failures.add("artifact_claim_invalid");
+  }
   if (!hasValidContractEvent(params.contractEvents)) {
     failures.add("task_contract_unvalidated");
   }
@@ -148,7 +159,12 @@ function detectFailureTypes(params: {
   return [...failures].sort();
 }
 
-function buildReasons(failureTypes: FailureType[], runSummary: JsonRecord, observations: string[]): string[] {
+function buildReasons(
+  failureTypes: FailureType[],
+  runSummary: JsonRecord,
+  observations: string[],
+  artifactClaimValidation: JsonRecord | null,
+): string[] {
   const reasons: string[] = [];
   for (const type of failureTypes) {
     if (type === "search_timeout") {
@@ -159,6 +175,11 @@ function buildReasons(failureTypes: FailureType[], runSummary: JsonRecord, obser
       reasons.push("The reported result did not align with the expected final-answer checks.");
     } else if (type === "insufficient_evidence") {
       reasons.push("The run lacks complete structured evidence for the final claim.");
+    } else if (type === "artifact_claim_invalid") {
+      const failures = Array.isArray(artifactClaimValidation?.failures)
+        ? artifactClaimValidation.failures.join(", ")
+        : "unknown checks";
+      reasons.push(`Artifact claim validation failed: ${failures}.`);
     } else if (type === "task_contract_unvalidated") {
       reasons.push("No valid Task Contract validation event was found in this evidence directory.");
     } else if (type === "tool_capability_missing") {
@@ -196,6 +217,10 @@ function buildCorrectiveActions(failureTypes: FailureType[]): FailureDiagnosis["
     insufficient_evidence: {
       action: "Record code, command, run log, result JSON, and verification boundary before writing the final report.",
       rationale: "Evidence completeness is what makes the claim auditable.",
+    },
+    artifact_claim_invalid: {
+      action: "Call nss_evimem_validate_artifact_claims after rerun artifacts are produced, then downgrade or rerun until failed checks are cleared.",
+      rationale: "A verified claim requires artifacts that satisfy the task-specific claim qualification checks.",
     },
     task_contract_unvalidated: {
       action: "Call nss_evimem_validate_contract before tool execution and save the valid contract in task_contract.json.",
@@ -243,6 +268,7 @@ function renderRerunPlan(diagnosis: FailureDiagnosis): string {
     "- Use the existing validated Task Contract from `task_contract.json` when present.",
     "- Re-register the executable tool capability before running the search.",
     "- Run a bounded fast scan first, then deep verification only for surviving candidates.",
+    "- Call `nss_evimem_validate_artifact_claims` before promoting any verified final claim.",
     "- Treat disappearing bias or near-zero multi-key bias as statistical noise.",
     "- Write code, command, run log, result JSON, and final report before claiming success.",
     "- If verification remains incomplete, report a bounded failure instead of a correct final answer.",
@@ -275,7 +301,7 @@ function diagnosisStatus(failureTypes: FailureType[]): FailureDiagnosis["status"
 }
 
 function diagnosisSeverity(failureTypes: FailureType[]): FailureDiagnosis["severity"] {
-  if (failureTypes.some((type) => ["oracle_mismatch", "overclaiming", "search_timeout"].includes(type))) {
+  if (failureTypes.some((type) => ["artifact_claim_invalid", "oracle_mismatch", "overclaiming", "search_timeout"].includes(type))) {
     return "high";
   }
   if (failureTypes.length > 0) {
@@ -363,6 +389,15 @@ function oracleAlignmentFailed(runSummary: JsonRecord): boolean {
     || oracle.reference_pair_match === false
     || oracle.best_split_mentioned === false
   );
+}
+
+function artifactClaimValidationFailed(validation: JsonRecord | null): boolean {
+  if (!validation) {
+    return false;
+  }
+  return validation.ok === false
+    || validation.supports_verified_claim === false
+    || validation.status === "failed";
 }
 
 function evidenceText(runSummary: JsonRecord, observations: string[], evidenceRecords: JsonRecord[]): string {
