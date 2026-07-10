@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -8,6 +8,21 @@ import { validateArtifactClaims } from "../dist/artifact-claim-validator.js";
 import { validateTaskContract } from "../dist/contract-validator.js";
 
 const METRIC = "minimum_differential_weight_or_max_probability";
+const DIFFERENTIAL_METRIC_CHECK_IDS = [
+  "required_artifacts_readable",
+  "task_boundary_preserved",
+  "scope_boundary_present",
+  "differential_nonzero_input",
+  "differential_nontrivial_weight",
+  "probability_weight_consistency",
+  "probability_semantics_declared",
+  "round_coverage_matches_contract",
+  "round_weight_sum_consistency",
+  "exactness_evidence_present",
+  "sampling_not_exact_proof",
+  "method_result_conflict_resolved",
+  "primitive_model_invariants",
+];
 
 function taskContract(overrides = {}) {
   return {
@@ -65,18 +80,23 @@ function fixture() {
   mkdirSync(evidenceDir, { recursive: true });
   const sourcePath = join(root, "solver.py");
   writeFileSync(sourcePath, "SIMON_ROTATIONS = (1, 8, 2)\nWORD_SIZE = 16\nSTATE_WORDS = 2\n", "utf8");
-  return { evidenceDir, sourcePath };
+  return { root, evidenceDir, sourcePath };
 }
 
-test("accepts a known compatible verification profile", () => {
-  const { evidenceDir } = fixture();
+test("accepts a known compatible verification profile", (t) => {
+  const { root, evidenceDir } = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
   const validation = validateTaskContract({ task_contract: taskContract(), evidence_dir: evidenceDir });
   assert.equal(validation.status, "valid_contract");
   assert.equal(validation.verification_profile?.id, "differential_metric_v1");
+  assert.equal(validation.verification_profile?.version, 1);
+  assert.equal(validation.verification_profile?.primitive_profile, "simon_family_v1");
+  assert.equal(validation.verification_profile?.claim_mode, "exact_or_honest_bound");
 });
 
-test("rejects an unknown verification profile", () => {
-  const { evidenceDir } = fixture();
+test("rejects an unknown verification profile", (t) => {
+  const { root, evidenceDir } = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
   const validation = validateTaskContract({
     task_contract: taskContract({ verification_profile: { id: "unknown_profile_v1" } }),
     evidence_dir: evidenceDir,
@@ -85,8 +105,9 @@ test("rejects an unknown verification profile", () => {
   assert.match(validation.reasons.join("\n"), /unknown verification profile/i);
 });
 
-test("rejects a profile that is incompatible with the analysis type", () => {
-  const { evidenceDir } = fixture();
+test("rejects a profile that is incompatible with the analysis type", (t) => {
+  const { root, evidenceDir } = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
   const validation = validateTaskContract({
     task_contract: taskContract({ analysis_type: "linear" }),
     evidence_dir: evidenceDir,
@@ -95,8 +116,9 @@ test("rejects a profile that is incompatible with the analysis type", () => {
   assert.match(validation.reasons.join("\n"), /analysis_type/i);
 });
 
-function validate(result, contract = taskContract()) {
-  const { evidenceDir, sourcePath } = fixture();
+function validate(t, result, contract = taskContract()) {
+  const { root, evidenceDir, sourcePath } = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
   return validateArtifactClaims({
     case_id: String(contract.case_id),
     task_contract: contract,
@@ -106,61 +128,83 @@ function validate(result, contract = taskContract()) {
   });
 }
 
-test("rejects a nontrivial ten-round SIMON result with zero weight", () => {
-  const result = validResult({ total_weight: 0, probability: 1 });
-  const validation = validate(result);
+test("rejects a nontrivial ten-round SIMON result with zero weight", (t) => {
+  const result = validResult({
+    total_weight: 0,
+    probability: 1,
+    trail: Array.from({ length: 10 }, (_, index) => ({
+      round: index + 1,
+      weight: 0,
+    })),
+  });
+  const validation = validate(t, result);
   assert.equal(validation.supports_verified_claim, false);
   assert.ok(validation.failures.includes("differential_nontrivial_weight"));
   assert.equal(validation.recommended_claim_level, "reject");
 });
 
-test("rejects inconsistent probability and weight", () => {
-  const validation = validate(validResult({ total_weight: 7, probability: "2^-6" }));
+test("rejects inconsistent probability and weight", (t) => {
+  const validation = validate(t, validResult({ total_weight: 7, probability: "2^-6" }));
+  assert.equal(validation.supports_verified_claim, false);
   assert.ok(validation.failures.includes("probability_weight_consistency"));
+  assert.equal(validation.recommended_claim_level, "reject");
 });
 
-test("requires conflicting exact method results to be resolved", () => {
-  const validation = validate(validResult({
+test("requires conflicting exact method results to be resolved", (t) => {
+  const validation = validate(t, validResult({
     methods: {
       exhaustive: { status: "optimal", weight: 7 },
       literature: { status: "exact", weight: 9 },
     },
   }));
+  assert.equal(validation.supports_verified_claim, false);
   assert.ok(validation.failures.includes("method_result_conflict_resolved"));
   assert.equal(validation.recommended_claim_level, "bounded");
 });
 
-test("does not accept sampling alone as proof of an exact optimum", () => {
-  const validation = validate(validResult({
+test("does not accept sampling alone as proof of an exact optimum", (t) => {
+  const validation = validate(t, validResult({
     proof: { method: "sampling", status: "completed", samples: 100000 },
   }));
+  assert.equal(validation.supports_verified_claim, false);
   assert.ok(validation.failures.includes("sampling_not_exact_proof"));
+  assert.equal(validation.recommended_claim_level, "bounded");
 });
 
-test("accepts process-complete evidence without knowing an oracle answer", () => {
-  const validation = validate(validResult());
+test("accepts process-complete evidence without knowing an oracle answer", (t) => {
+  const validation = validate(t, validResult());
   assert.equal(validation.schema, "nss_evimem.artifact_claim_validation.v2");
   assert.equal(validation.verification_scope, "evidence_eligibility_not_oracle_correctness");
+  assert.equal(validation.verification_profile?.id, "differential_metric_v1");
+  assert.equal(validation.verification_profile?.version, 1);
+  assert.equal(validation.verification_profile?.primitive_profile, "simon_family_v1");
+  assert.equal(validation.verification_profile?.claim_mode, "exact_or_honest_bound");
+  for (const checkId of DIFFERENTIAL_METRIC_CHECK_IDS) {
+    assert.ok(validation.checks.some((check) => check.id === checkId), `missing mandatory check: ${checkId}`);
+  }
   assert.equal(validation.supports_verified_claim, true);
   assert.equal(validation.recommended_claim_level, "verified");
 });
 
-test("a Contract without a profile remains runnable but cannot gain verified status", () => {
+test("a Contract without a profile remains runnable but cannot gain verified status", (t) => {
   const contract = taskContract();
   delete contract.verification_profile;
-  const validation = validate(validResult(), contract);
+  const validation = validate(t, validResult(), contract);
   assert.equal(validation.supports_verified_claim, false);
   assert.equal(validation.recommended_claim_level, "candidate");
   assert.ok(validation.warnings.includes("verification_profile_not_declared"));
 });
 
-test("an unreadable result path is returned as a validation failure", () => {
-  const { evidenceDir, sourcePath } = fixture();
+test("an unreadable result path is returned as a validation failure", (t) => {
+  const { root, evidenceDir, sourcePath } = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
   const validation = validateArtifactClaims({
     task_contract: taskContract(),
     result_path: join(evidenceDir, "missing.json"),
     source_paths: [sourcePath],
     evidence_dir: evidenceDir,
   });
+  assert.equal(validation.supports_verified_claim, false);
   assert.ok(validation.failures.includes("result_artifact_readable"));
+  assert.equal(validation.recommended_claim_level, "reject");
 });
