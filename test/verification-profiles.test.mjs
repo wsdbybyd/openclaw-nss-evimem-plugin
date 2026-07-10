@@ -198,12 +198,15 @@ test("a Contract without a profile remains runnable but cannot gain verified sta
 test("an unreadable result path is returned as a validation failure", (t) => {
   const { root, evidenceDir, sourcePath } = fixture();
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const validation = validateArtifactClaims({
-    task_contract: taskContract(),
-    result_path: join(evidenceDir, "missing.json"),
-    source_paths: [sourcePath],
-    evidence_dir: evidenceDir,
-  });
+  let validation;
+  assert.doesNotThrow(() => {
+    validation = validateArtifactClaims({
+      task_contract: taskContract(),
+      result_path: join(evidenceDir, "missing.json"),
+      source_paths: [sourcePath],
+      evidence_dir: evidenceDir,
+    });
+  }, "an unreadable result path must return a structured validation failure");
   assert.equal(validation.supports_verified_claim, false);
   assert.ok(validation.failures.includes("result_artifact_readable"));
   assert.equal(validation.recommended_claim_level, "reject");
