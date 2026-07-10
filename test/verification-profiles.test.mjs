@@ -1,0 +1,166 @@
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+
+import { validateArtifactClaims } from "../dist/artifact-claim-validator.js";
+import { validateTaskContract } from "../dist/contract-validator.js";
+
+const METRIC = "minimum_differential_weight_or_max_probability";
+
+function taskContract(overrides = {}) {
+  return {
+    case_id: "profile-test",
+    domain: "symmetric_cryptanalysis",
+    cipher: "SIMON32",
+    rounds: 10,
+    analysis_type: "differential",
+    metric: METRIC,
+    objective: "reproduce_exact_metric_or_honest_bound",
+    scope: "reduced_round",
+    verification_profile: {
+      id: "differential_metric_v1",
+      primitive_profile: "simon_family_v1",
+      claim_mode: "exact_or_honest_bound",
+    },
+    ...overrides,
+  };
+}
+
+function validResult(overrides = {}) {
+  return {
+    cipher: "SIMON32",
+    rounds: 10,
+    analysis_type: "differential",
+    metric: METRIC,
+    scope: "10-round reduced-round SIMON32 instance",
+    status: "optimal",
+    claim_type: "exact",
+    probability_semantics: "single_characteristic",
+    total_weight: 7,
+    probability: "2^-7",
+    input_difference_words: [0, 1],
+    model: {
+      state_words: 2,
+      word_size_bits: 16,
+      rotations: [1, 8, 2],
+      exclude_zero_input: true,
+    },
+    proof: {
+      method: "solver",
+      status: "optimal",
+    },
+    trail: Array.from({ length: 10 }, (_, index) => ({
+      round: index + 1,
+      weight: index < 7 ? 1 : 0,
+    })),
+    ...overrides,
+  };
+}
+
+function fixture() {
+  const root = mkdtempSync(join(tmpdir(), "nss-evimem-profile-"));
+  const evidenceDir = join(root, "evidence");
+  mkdirSync(evidenceDir, { recursive: true });
+  const sourcePath = join(root, "solver.py");
+  writeFileSync(sourcePath, "SIMON_ROTATIONS = (1, 8, 2)\nWORD_SIZE = 16\nSTATE_WORDS = 2\n", "utf8");
+  return { evidenceDir, sourcePath };
+}
+
+test("accepts a known compatible verification profile", () => {
+  const { evidenceDir } = fixture();
+  const validation = validateTaskContract({ task_contract: taskContract(), evidence_dir: evidenceDir });
+  assert.equal(validation.status, "valid_contract");
+  assert.equal(validation.verification_profile?.id, "differential_metric_v1");
+});
+
+test("rejects an unknown verification profile", () => {
+  const { evidenceDir } = fixture();
+  const validation = validateTaskContract({
+    task_contract: taskContract({ verification_profile: { id: "unknown_profile_v1" } }),
+    evidence_dir: evidenceDir,
+  });
+  assert.equal(validation.status, "unsupported_contract");
+  assert.match(validation.reasons.join("\n"), /unknown verification profile/i);
+});
+
+test("rejects a profile that is incompatible with the analysis type", () => {
+  const { evidenceDir } = fixture();
+  const validation = validateTaskContract({
+    task_contract: taskContract({ analysis_type: "linear" }),
+    evidence_dir: evidenceDir,
+  });
+  assert.equal(validation.status, "invalid_contract");
+  assert.match(validation.reasons.join("\n"), /analysis_type/i);
+});
+
+function validate(result, contract = taskContract()) {
+  const { evidenceDir, sourcePath } = fixture();
+  return validateArtifactClaims({
+    case_id: String(contract.case_id),
+    task_contract: contract,
+    result,
+    source_paths: [sourcePath],
+    evidence_dir: evidenceDir,
+  });
+}
+
+test("rejects a nontrivial ten-round SIMON result with zero weight", () => {
+  const result = validResult({ total_weight: 0, probability: 1 });
+  const validation = validate(result);
+  assert.equal(validation.supports_verified_claim, false);
+  assert.ok(validation.failures.includes("differential_nontrivial_weight"));
+  assert.equal(validation.recommended_claim_level, "reject");
+});
+
+test("rejects inconsistent probability and weight", () => {
+  const validation = validate(validResult({ total_weight: 7, probability: "2^-6" }));
+  assert.ok(validation.failures.includes("probability_weight_consistency"));
+});
+
+test("requires conflicting exact method results to be resolved", () => {
+  const validation = validate(validResult({
+    methods: {
+      exhaustive: { status: "optimal", weight: 7 },
+      literature: { status: "exact", weight: 9 },
+    },
+  }));
+  assert.ok(validation.failures.includes("method_result_conflict_resolved"));
+  assert.equal(validation.recommended_claim_level, "bounded");
+});
+
+test("does not accept sampling alone as proof of an exact optimum", () => {
+  const validation = validate(validResult({
+    proof: { method: "sampling", status: "completed", samples: 100000 },
+  }));
+  assert.ok(validation.failures.includes("sampling_not_exact_proof"));
+});
+
+test("accepts process-complete evidence without knowing an oracle answer", () => {
+  const validation = validate(validResult());
+  assert.equal(validation.schema, "nss_evimem.artifact_claim_validation.v2");
+  assert.equal(validation.verification_scope, "evidence_eligibility_not_oracle_correctness");
+  assert.equal(validation.supports_verified_claim, true);
+  assert.equal(validation.recommended_claim_level, "verified");
+});
+
+test("a Contract without a profile remains runnable but cannot gain verified status", () => {
+  const contract = taskContract();
+  delete contract.verification_profile;
+  const validation = validate(validResult(), contract);
+  assert.equal(validation.supports_verified_claim, false);
+  assert.equal(validation.recommended_claim_level, "candidate");
+  assert.ok(validation.warnings.includes("verification_profile_not_declared"));
+});
+
+test("an unreadable result path is returned as a validation failure", () => {
+  const { evidenceDir, sourcePath } = fixture();
+  const validation = validateArtifactClaims({
+    task_contract: taskContract(),
+    result_path: join(evidenceDir, "missing.json"),
+    source_paths: [sourcePath],
+    evidence_dir: evidenceDir,
+  });
+  assert.ok(validation.failures.includes("result_artifact_readable"));
+});
