@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { capabilityFieldMatches, capabilitySupportsContractFields } from "./capability-matcher.js";
 import { getEvidenceDir, isRecord, stableStringify, utcNow } from "./evidence-store.js";
 import { readToolCapabilityRegistry } from "./tool-capability-registry.js";
+import { resolveVerificationProfile } from "./verification-profile-registry.js";
 import type {
   ContractValidationResult,
   ContractValidationStatus,
@@ -31,8 +32,15 @@ export function validateTaskContract(params: {
   mkdirSync(evidenceDir, { recursive: true });
 
   const missingFields = missingRequiredFields(params.task_contract, params.required_fields);
-  const invalidReasons = invalidContractReasons(params.task_contract);
-  const unsupportedReasons = unsupportedContractReasons(params);
+  const profileResolution = resolveVerificationProfile(params.task_contract);
+  const invalidReasons = [
+    ...invalidContractReasons(params.task_contract),
+    ...profileResolution.invalid_reasons,
+  ];
+  const unsupportedReasons = [
+    ...unsupportedContractReasons(params),
+    ...profileResolution.unsupported_reasons,
+  ];
   const matchingTools = params.require_matching_tool
     ? findMatchingTools(evidenceDir, params.task_contract)
     : [];
@@ -51,6 +59,8 @@ export function validateTaskContract(params: {
     reasons: [...invalidReasons, ...unsupportedReasons],
     matching_tools: matchingTools,
     saved_as_current: saveAsCurrent,
+    verification_profile: profileResolution.profile,
+    warnings: profileResolution.warnings,
   };
 
   appendFileSync(join(evidenceDir, "contract_validation_events.jsonl"), `${stableStringify(result)}\n`, "utf8");

@@ -82,6 +82,31 @@ export type EvidenceRecord = {
 
 export type TaskContract = JsonRecord;
 
+export type VerificationProfileRequest = {
+  id: string;
+  primitive_profile?: string;
+  claim_mode?: string;
+};
+
+export type VerificationProfileSelectionSource = "explicit" | "legacy_case_alias" | "default_generic";
+
+export type ResolvedVerificationProfile = {
+  id: string;
+  version: number;
+  primitive_profile: string | null;
+  claim_mode: string;
+  selection_source: VerificationProfileSelectionSource;
+};
+
+export type VerificationProfileResolution = {
+  ok: boolean;
+  requested: VerificationProfileRequest | null;
+  profile: ResolvedVerificationProfile;
+  invalid_reasons: string[];
+  unsupported_reasons: string[];
+  warnings: string[];
+};
+
 export type ToolCapability = JsonRecord;
 
 export type ToolCapabilityRecord = {
@@ -107,6 +132,8 @@ export type ContractValidationResult = {
   reasons: string[];
   matching_tools: string[];
   saved_as_current: boolean;
+  verification_profile: ResolvedVerificationProfile;
+  warnings: string[];
 };
 
 export type GuardMode = "pre_block" | "pre_redirect" | "post_check" | "post_repair" | "observe";
