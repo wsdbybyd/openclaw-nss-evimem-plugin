@@ -187,8 +187,8 @@ Outputs:
 `recommended_claim_level` is one of:
 
 - `verified`: no checks failed, a verifying non-generic profile was selected, and the structured claim intent is `verified`, `exact`, `optimal`, or a verified distinguisher as allowed by that profile.
-- `bounded`: the structured claim is explicitly bounded, or exactness, sampling, or method-conflict evidence limits an exact claim.
-- `candidate`: the structured claim is explicitly a candidate, process evidence is missing or incomplete, or remaining unclassified checks fail.
+- `bounded`: the structured claim is explicitly bounded, the result or report explicitly says `not verified` or `no verified`, or exactness, sampling, or method-conflict evidence limits an exact claim.
+- `candidate`: the structured claim is explicitly a candidate, its intent is absent or unrecognized even when process evidence otherwise looks complete, process evidence is missing or incomplete, or remaining unclassified checks fail.
 - `reject`: the artifacts have a contradictory or invalid result, unreadable structured result, task-boundary mismatch, zero-input or nontrivial-weight violation, probability inconsistency, or invalid primitive model.
 
 ### `nss_evimem_diagnose_failure`
