@@ -1,5 +1,17 @@
 export type JsonRecord = Record<string, unknown>;
 
+export type ArtifactClaimCheckStatus = "pass" | "fail" | "warn" | "not_applicable";
+export type ArtifactClaimCheckSeverity = "high" | "medium" | "low";
+export type RecommendedClaimLevel = "verified" | "bounded" | "candidate" | "reject";
+
+export type ArtifactClaimCheck = {
+  id: string;
+  status: ArtifactClaimCheckStatus;
+  severity: ArtifactClaimCheckSeverity;
+  reason: string;
+  evidence?: string;
+};
+
 export type HookName = "before_tool_call" | "after_tool_call";
 
 export type PluginHookBeforeToolCallEvent = {

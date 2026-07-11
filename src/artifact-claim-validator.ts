@@ -2,26 +2,28 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { join, resolve } from "node:path";
 
 import { getEvidenceDir, isRecord, stableStringify, utcNow } from "./evidence-store.js";
-import type { JsonRecord, PluginHookToolContext, TaskContract } from "./types.js";
-
-type CheckStatus = "pass" | "fail" | "warn" | "not_applicable";
-type CheckSeverity = "high" | "medium" | "low";
-
-type ArtifactClaimCheck = {
-  id: string;
-  status: CheckStatus;
-  severity: CheckSeverity;
-  reason: string;
-  evidence?: string;
-};
+import { differentialMetricChecks } from "./differential-metric-profile.js";
+import { resolveVerificationProfile, sanitizeTaskContract } from "./verification-profile-registry.js";
+import type {
+  ArtifactClaimCheck,
+  JsonRecord,
+  PluginHookToolContext,
+  RecommendedClaimLevel,
+  ResolvedVerificationProfile,
+  TaskContract,
+  VerificationProfileResolution,
+} from "./types.js";
 
 export type ArtifactClaimValidationResult = {
-  schema: "nss_evimem.artifact_claim_validation.v1";
+  schema: "nss_evimem.artifact_claim_validation.v2";
   timestamp: string;
   case_id: string;
   status: "passed" | "failed" | "warning";
   ok: boolean;
   supports_verified_claim: boolean;
+  verification_profile: ResolvedVerificationProfile;
+  verification_scope: "evidence_eligibility_not_oracle_correctness";
+  recommended_claim_level: RecommendedClaimLevel;
   task_contract: TaskContract;
   checks: ArtifactClaimCheck[];
   failures: string[];
@@ -48,36 +50,73 @@ export function validateArtifactClaims(params: {
   ctx?: PluginHookToolContext;
   evidence_dir?: string;
 }): ArtifactClaimValidationResult {
+  const sanitization = sanitizeTaskContract(params.task_contract ?? {});
+  const taskContract = sanitization.task_contract;
+  const caseId = params.case_id ?? stringValue(taskContract.case_id) ?? "generic";
+  const profileResolution = resolveVerificationProfile(taskContract, caseId);
   const evidenceDir = getEvidenceDir(params.ctx, params.evidence_dir);
   mkdirSync(evidenceDir, { recursive: true });
 
   const resultPath = optionalExistingPath(params.result_path);
   const reportPath = optionalExistingPath(params.report_path);
   const sourcePaths = (params.source_paths ?? []).map((path) => resolve(path));
-  const result = params.result ?? readJsonIfRecord(resultPath);
+  const loadedResult = readJsonArtifact(resultPath);
+  const result = params.result ?? loadedResult.result;
   const reportText = [params.report_text, readTextIfPresent(reportPath)].filter(Boolean).join("\n");
-  const sourceText = sourcePaths.map((path) => readTextIfPresent(path)).filter(Boolean).join("\n");
-  const taskContract = params.task_contract ?? {};
-  const caseId = params.case_id ?? stringValue(taskContract.case_id) ?? "generic";
+  const readableSources = sourcePaths.map((path) => readTextIfPresent(path)).filter(Boolean);
+  const sourceText = readableSources.join("\n");
 
   const checks: ArtifactClaimCheck[] = [
     ...genericChecks(result, reportText),
-    ...caseSpecificChecks(caseId, taskContract, result, reportText, sourceText),
+    ...profileWarningChecks([...sanitization.warnings, ...profileResolution.warnings]),
   ];
+  if (params.result_path && loadedResult.error) {
+    checks.push({
+      id: "result_artifact_readable",
+      status: "fail",
+      severity: "high",
+      reason: "The structured result artifact must exist and contain a JSON object.",
+      evidence: loadedResult.error,
+    });
+  }
+  if (profileResolution.profile.id === "differential_metric_v1") {
+    checks.push(...differentialMetricChecks({
+      taskContract,
+      result,
+      reportText,
+      sourceText,
+      readableSourceCount: readableSources.length,
+    }));
+  } else if (profileResolution.profile.id === "simon_dl_distinguisher_v1") {
+    checks.push(...simonDlChecks(taskContract, result, reportText, sourceText));
+  } else {
+    checks.push({
+      id: "case_specific_rules",
+      status: "not_applicable",
+      severity: "low",
+      reason: "No case-specific artifact rules apply to this task.",
+    });
+  }
   const failures = checks.filter((check) => check.status === "fail").map((check) => check.id);
   const warnings = checks.filter((check) => check.status === "warn").map((check) => check.id);
-  const supportsVerifiedClaim = failures.length === 0;
+  const profileCanVerify = profileResolution.ok
+    && profileResolution.profile.selection_source !== "default_generic";
+  const supportsVerifiedClaim = failures.length === 0 && profileCanVerify;
+  const recommendedClaimLevel = recommendClaimLevel(checks, profileResolution, supportsVerifiedClaim);
   const status = failures.length > 0 ? "failed" : warnings.length > 0 ? "warning" : "passed";
 
   const validationPath = join(evidenceDir, "artifact_claim_validation.json");
   const eventsPath = join(evidenceDir, "artifact_claim_validation_events.jsonl");
   const resultRecord: ArtifactClaimValidationResult = {
-    schema: "nss_evimem.artifact_claim_validation.v1",
+    schema: "nss_evimem.artifact_claim_validation.v2",
     timestamp: utcNow(),
     case_id: caseId,
     status,
     ok: supportsVerifiedClaim,
     supports_verified_claim: supportsVerifiedClaim,
+    verification_profile: profileResolution.profile,
+    verification_scope: "evidence_eligibility_not_oracle_correctness",
+    recommended_claim_level: recommendedClaimLevel,
     task_contract: taskContract,
     checks,
     failures,
@@ -128,24 +167,43 @@ function genericChecks(result: JsonRecord, reportText: string): ArtifactClaimChe
   return checks;
 }
 
-function caseSpecificChecks(
-  caseId: string,
+function profileWarningChecks(warnings: string[]): ArtifactClaimCheck[] {
+  return [...new Set(warnings)].map((warning) => ({
+    id: warning,
+    status: "warn" as const,
+    severity: "low" as const,
+    reason: `Verification profile warning: ${warning}.`,
+  }));
+}
+
+function recommendClaimLevel(
+  checks: ArtifactClaimCheck[],
+  profileResolution: VerificationProfileResolution,
+  supportsVerifiedClaim: boolean,
+): RecommendedClaimLevel {
+  if (supportsVerifiedClaim) return "verified";
+  const failures = new Set(checks.filter((item) => item.status === "fail").map((item) => item.id));
+  if ([
+    "result_claim_consistency",
+    "result_artifact_readable",
+    "task_boundary_preserved",
+    "differential_nonzero_input",
+    "differential_nontrivial_weight",
+    "probability_weight_consistency",
+    "primitive_model_invariants",
+  ].some((id) => failures.has(id))) return "reject";
+  if (["exactness_evidence_present", "sampling_not_exact_proof", "method_result_conflict_resolved"]
+    .some((id) => failures.has(id))) return "bounded";
+  if (profileResolution.profile.selection_source === "default_generic") return "candidate";
+  return "candidate";
+}
+
+function simonDlChecks(
   taskContract: TaskContract,
   result: JsonRecord,
   reportText: string,
   sourceText: string,
 ): ArtifactClaimCheck[] {
-  const normalizedCase = normalizeText(caseId);
-  const cipher = normalizeText(taskContract.cipher);
-  if (!normalizedCase.includes("cbsc-v2-hard-simon32-dl-search-002") && !cipher.includes("simon32/64")) {
-    return [{
-      id: "case_specific_rules",
-      status: "not_applicable",
-      severity: "low",
-      reason: "No case-specific artifact rules apply to this task.",
-    }];
-  }
-
   const corpus = normalizeText([stableStringify(result), reportText, sourceText].join("\n"));
   const source = normalizeText(sourceText);
   return [
@@ -192,7 +250,7 @@ function caseSpecificChecks(
 function check(
   id: string,
   passed: boolean,
-  severity: CheckSeverity,
+  severity: ArtifactClaimCheck["severity"],
   reason: string,
   evidence?: string,
 ): ArtifactClaimCheck {
@@ -237,12 +295,16 @@ function countHexWords(text: string): number {
   return (text.match(/0x[0-9a-f]{4}/g) ?? []).length;
 }
 
-function readJsonIfRecord(path: string | null): JsonRecord {
-  if (!path) {
-    return {};
+function readJsonArtifact(path: string | null): { result: JsonRecord; error: string | null } {
+  if (!path) return { result: {}, error: null };
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    return isRecord(parsed)
+      ? { result: parsed, error: null }
+      : { result: {}, error: "result artifact root must be an object" };
+  } catch (error) {
+    return { result: {}, error: error instanceof Error ? error.message : String(error) };
   }
-  const parsed = JSON.parse(readFileSync(path, "utf8"));
-  return isRecord(parsed) ? parsed : {};
 }
 
 function readTextIfPresent(path: string | null): string {

@@ -224,6 +224,38 @@ function validate(t, result, contract = taskContract()) {
   });
 }
 
+test("sanitizes forbidden Contract fields during direct artifact validation", (t) => {
+  const { root, evidenceDir, sourcePath } = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const forbiddenFields = ["expected_answer", "oracle", "disabled_checks", "severity_overrides"];
+  const forbiddenValues = Object.fromEntries(forbiddenFields.map((field) => [field, "dummy"]));
+  const contract = taskContract({
+    ...forbiddenValues,
+    verification_profile: {
+      id: "differential_metric_v1",
+      primitive_profile: "simon_family_v1",
+      claim_mode: "exact_or_honest_bound",
+      ...forbiddenValues,
+    },
+  });
+
+  const validation = validateArtifactClaims({
+    task_contract: contract,
+    result: validResult(),
+    source_paths: [sourcePath],
+    evidence_dir: evidenceDir,
+  });
+  const persisted = JSON.parse(readFileSync(join(evidenceDir, "artifact_claim_validation.json"), "utf8"));
+
+  for (const field of forbiddenFields) {
+    assert.equal(field in validation.task_contract, false, `result retained top-level ${field}`);
+    assert.equal(field in validation.task_contract.verification_profile, false, `result retained nested ${field}`);
+    assert.equal(field in persisted.task_contract, false, `persisted result retained top-level ${field}`);
+    assert.equal(field in persisted.task_contract.verification_profile, false, `persisted result retained nested ${field}`);
+    assert.ok(validation.warnings.includes(`ignored_profile_field:${field}`));
+  }
+});
+
 test("rejects a nontrivial ten-round SIMON result with zero weight", (t) => {
   const result = validResult({
     total_weight: 0,
