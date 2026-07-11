@@ -271,6 +271,79 @@ test("rejects a nontrivial ten-round SIMON result with zero weight", (t) => {
   assert.equal(validation.recommended_claim_level, "reject");
 });
 
+test("uses the resolved SIMON primitive profile when cipher metadata is mismatched", (t) => {
+  const contract = taskContract({ cipher: "AES" });
+  const validation = validate(t, validResult({
+    cipher: "AES",
+    total_weight: 0,
+    probability: 1,
+    model: { exclude_zero_input: false },
+    trail: Array.from({ length: 10 }, (_, index) => ({ round: index + 1, weight: 0 })),
+  }), contract);
+
+  assert.ok(validation.failures.includes("differential_nontrivial_weight"));
+  assert.ok(validation.failures.includes("primitive_model_invariants"));
+});
+
+test("combines structured and source SIMON model evidence field by field", (t) => {
+  const { root, evidenceDir, sourcePath } = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(sourcePath, "SIMON_ROTATIONS = (1, 8, 2)\nWORD_SIZE = 16\n", "utf8");
+  const validation = validateArtifactClaims({
+    task_contract: taskContract(),
+    result: validResult({ model: { state_words: 2, exclude_zero_input: true } }),
+    source_paths: [sourcePath],
+    evidence_dir: evidenceDir,
+  });
+
+  assert.equal(validation.failures.includes("primitive_model_invariants"), false);
+});
+
+test("does not compare probability and weight unless both metrics are present", (t) => {
+  const weightOnly = validate(t, validResult({ probability: undefined }));
+  const probabilityOnly = validate(t, validResult({ total_weight: undefined }));
+
+  for (const validation of [weightOnly, probabilityOnly]) {
+    assert.equal(validation.failures.includes("probability_weight_consistency"), false);
+    assert.equal(validation.failures.includes("differential_nontrivial_weight"), false);
+  }
+});
+
+test("requires a structured result and one readable source artifact", (t) => {
+  const { root, evidenceDir } = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const noSource = validateArtifactClaims({
+    task_contract: taskContract(),
+    result: validResult(),
+    evidence_dir: evidenceDir,
+  });
+  const multipleRequiredArtifacts = validate(t, validResult(), taskContract({
+    required_artifacts: ["result.json", "solver.py"],
+  }));
+
+  assert.ok(noSource.failures.includes("required_artifacts_readable"));
+  assert.equal(multipleRequiredArtifacts.failures.includes("required_artifacts_readable"), false);
+});
+
+test("allows declared-round exact evidence without a trail", (t) => {
+  const validation = validate(t, validResult({
+    trail: undefined,
+    source_reference: "local solver source",
+  }));
+
+  assert.equal(validation.failures.includes("round_coverage_matches_contract"), false);
+  assert.equal(validation.failures.includes("round_weight_sum_consistency"), false);
+});
+
+test("accepts sampling when independent exactness evidence is present", (t) => {
+  const validation = validate(t, validResult({
+    proof: { method: "sampling", status: "completed" },
+    coverage: { status: "complete" },
+  }));
+
+  assert.equal(validation.failures.includes("sampling_not_exact_proof"), false);
+});
+
 test("rejects inconsistent probability and weight", (t) => {
   const validation = validate(t, validResult({ total_weight: 7, probability: "2^-6" }));
   assert.equal(validation.supports_verified_claim, false);

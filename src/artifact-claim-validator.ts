@@ -86,6 +86,7 @@ export function validateArtifactClaims(params: {
       reportText,
       sourceText,
       readableSourceCount: readableSources.length,
+      primitiveProfile: profileResolution.profile.primitive_profile,
     }));
   } else if (profileResolution.profile.id === "simon_dl_distinguisher_v1") {
     checks.push(...simonDlChecks(taskContract, result, reportText, sourceText));

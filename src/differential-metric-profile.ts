@@ -7,8 +7,9 @@ export function differentialMetricChecks(params: {
   reportText: string;
   sourceText: string;
   readableSourceCount: number;
+  primitiveProfile: string | null;
 }): ArtifactClaimCheck[] {
-  const { taskContract, result, reportText, sourceText, readableSourceCount } = params;
+  const { taskContract, result, reportText, sourceText, readableSourceCount, primitiveProfile } = params;
   const corpus = normalize([stableStringify(result), reportText, sourceText].join("\n"));
   const weight = firstNumber(result, ["total_weight", "minimum_differential_weight", "best_weight", "weight"]);
   const probability = parseProbability(firstValue(result, ["probability", "maximum_differential_probability"]));
@@ -25,20 +26,16 @@ export function differentialMetricChecks(params: {
     || (isRecord(result.coverage) && normalize(result.coverage.status) === "complete")
     || hasNonEmptyValue(result.source_reference);
   const samplingProof = /sampling|random|monte_carlo/.test(proofMethod);
-  const simon = normalize(taskContract.cipher).startsWith("simon");
+  const simon = primitiveProfile === "simon_family_v1";
   const zeroClaim = simon && (rounds ?? 0) > 1 && nonzeroInput && exactClaim
     && (weight === 0 || probability === 1);
-  const requiredArtifacts = Array.isArray(taskContract.required_artifacts)
-    ? taskContract.required_artifacts.filter((item) => typeof item === "string")
-    : [];
   const model = isRecord(result.model) ? result.model : {};
-  const structuredModelCore = (
-    numberValue(model.state_words) === 2
-    && (isSimon32(taskContract, result) ? numberValue(model.word_size_bits) === 16 : true)
-    && rotationsMatch(model.rotations)
-  );
-  const sourceSupportsModel = sourceModelInvariants(sourceText, isSimon32(taskContract, result));
-  const modelInvariants = !simon || ((structuredModelCore || sourceSupportsModel) && model.exclude_zero_input === true);
+  const simon32 = isSimon32(taskContract, result);
+  const stateWordsValid = numberValue(model.state_words) === 2 || sourceHasStateWords(sourceText);
+  const wordSizeValid = !simon32 || numberValue(model.word_size_bits) === 16 || sourceHasWordSize(sourceText);
+  const rotationsValid = rotationsMatch(model.rotations) || sourceHasRotations(sourceText);
+  const sourceSupportsModel = sourceHasStateWords(sourceText) || sourceHasWordSize(sourceText) || sourceHasRotations(sourceText);
+  const modelInvariants = !simon || (stateWordsValid && wordSizeValid && rotationsValid && model.exclude_zero_input === true);
   const methodValues = collectMethodWeights(result.methods);
   const conflictResolved = methodValues.size <= 1
     || hasNonEmptyValue(result.conflict_resolution)
@@ -50,17 +47,17 @@ export function differentialMetricChecks(params: {
   }, 0) : null;
 
   return [
-    check("required_artifacts_readable", requiredArtifacts.length === 0 || readableSourceCount >= requiredArtifacts.length, "high", "Required source artifacts must be readable.", `readable_source_count=${readableSourceCount}`),
+    check("required_artifacts_readable", Object.keys(result).length > 0 && readableSourceCount > 0, "high", "The profile requires a nonempty structured result and at least one readable source artifact.", `readable_source_count=${readableSourceCount}`),
     check("task_boundary_preserved", taskBoundaryMatches(taskContract, result), "high", "Result metadata must preserve the task Contract boundary."),
     check("scope_boundary_present", hasNonEmptyValue(result.scope) || (typeof taskContract.scope === "string" && corpus.includes(normalize(taskContract.scope))), "medium", "The artifact must declare the analysis scope."),
     check("differential_nonzero_input", nonzeroInput, "high", "Differential claims require a nonzero input difference."),
-    check("differential_nontrivial_weight", !zeroClaim && weight !== null, zeroClaim ? "high" : "medium", "Exact multi-round SIMON claims must not report a zero weight or probability one for a nonzero input.", weight === null ? "no structured weight found" : `weight=${weight}`),
-    check("probability_weight_consistency", weight !== null && probability !== null && Math.abs(probability - 2 ** -weight) <= 1e-9, "high", "Probability must equal 2 ** -weight within tolerance."),
+    check("differential_nontrivial_weight", !zeroClaim && (weight !== null || probability !== null), zeroClaim ? "high" : "medium", "Differential claims must provide either weight or probability, and exact multi-round SIMON claims must not report zero weight or probability one for a nonzero input.", weight === null ? undefined : `weight=${weight}`),
+    check("probability_weight_consistency", weight === null || probability === null || Math.abs(probability - 2 ** -weight) <= 1e-9, "high", "Probability and weight must agree when both are present."),
     check("probability_semantics_declared", hasNonEmptyValue(result.probability_semantics), "medium", "The probability semantics must be declared in the structured result."),
-    check("round_coverage_matches_contract", rounds !== null && numberValue(result.rounds) === rounds && trail !== null && trail.length === rounds, "high", "Reported rounds and trail coverage must match the Contract."),
-    check("round_weight_sum_consistency", weight !== null && trailWeight !== null && Math.abs(trailWeight - weight) <= 1e-9, "medium", "Per-round weights must sum to the reported total weight."),
+    check("round_coverage_matches_contract", rounds !== null && numberValue(result.rounds) === rounds && (trail === null || trail.length === rounds), "high", "Reported rounds must match the Contract, and a supplied trail must cover those rounds."),
+    check("round_weight_sum_consistency", weight === null || trailWeight === null || Math.abs(trailWeight - weight) <= 1e-9, "medium", "When both are present, per-round weights must sum to the reported total weight."),
     check("exactness_evidence_present", !exactClaim || exactnessEvidence, "medium", "Exact claims require structured proof, complete coverage, or a source reference."),
-    check("sampling_not_exact_proof", !(exactClaim && samplingProof), "medium", "Sampling-based methods cannot alone establish an exact claim."),
+    check("sampling_not_exact_proof", !(exactClaim && samplingProof && !exactnessEvidence), "medium", "Sampling-based methods cannot alone establish an exact claim."),
     check("method_result_conflict_resolved", conflictResolved, "medium", "Conflicting method weights require a resolution or a bounded/candidate claim."),
     check("primitive_model_invariants", modelInvariants, "high", "SIMON artifacts must declare the required state, word size, rotations, and zero-input exclusion.", sourceSupportsModel ? "source supports state, word-size, and rotations; structured exclusion remains required" : undefined),
   ];
@@ -149,11 +146,17 @@ function rotationsMatch(value: unknown): boolean {
   return Array.isArray(value) && value.length === 3 && value.every((item, index) => numberValue(item) === [1, 8, 2][index]);
 }
 
-function sourceModelInvariants(sourceText: string, simon32: boolean): boolean {
+function sourceHasRotations(sourceText: string): boolean {
   const source = normalize(sourceText);
-  return /(?:rotations?|simon_rotations?)\s*=\s*[\[(]\s*1\s*,\s*8\s*,\s*2\s*[\])]/.test(source)
-    && (!simon32 || /(?:word_size|word_size_bits|word size)\s*=\s*16\b/.test(source))
-    && /(?:state_words|state words)\s*=\s*2\b/.test(source);
+  return /(?:rotations?|simon_rotations?)\s*=\s*[\[(]\s*1\s*,\s*8\s*,\s*2\s*[\])]/.test(source);
+}
+
+function sourceHasWordSize(sourceText: string): boolean {
+  return /(?:word_size|word_size_bits|word size)\s*=\s*16\b/.test(normalize(sourceText));
+}
+
+function sourceHasStateWords(sourceText: string): boolean {
+  return /(?:state_words|state words)\s*=\s*2\b/.test(normalize(sourceText));
 }
 
 function isSimon32(contract: TaskContract, result: JsonRecord): boolean {
