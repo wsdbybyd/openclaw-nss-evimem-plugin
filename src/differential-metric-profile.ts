@@ -13,7 +13,7 @@ export function differentialMetricChecks(params: {
   const corpus = normalize([stableStringify(result), reportText, sourceText].join("\n"));
   const weight = firstNumber(result, ["total_weight", "minimum_differential_weight", "best_weight", "weight"]);
   const probability = parseProbability(firstValue(result, ["probability", "maximum_differential_probability"]));
-  const exactClaim = ["optimal", "exact", "verified"].some((token) => corpus.includes(token));
+  const exactClaim = hasStructuredExactIntent(result);
   const inputWords = firstNumberArray(result, ["input_difference_words", "delta_in_words"]);
   const nonzeroInput = inputWords ? inputWords.some((value) => value !== 0) : hasNonzeroDifference(result) || hasNonzeroFirstTrailDifference(result.trail);
   const rounds = firstNumber(taskContract, ["rounds"]);
@@ -145,6 +145,10 @@ function taskBoundaryMatches(contract: TaskContract, result: JsonRecord): boolea
 function collectMethodWeights(methods: unknown): Set<number> {
   const weights = new Set<number>();
   const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
     if (!isRecord(value)) return;
     for (const key of ["weight", "best_weight", "verified_weight"]) {
       const number = numberValue(value[key]);
@@ -155,6 +159,13 @@ function collectMethodWeights(methods: unknown): Set<number> {
   const entries = Array.isArray(methods) ? methods : isRecord(methods) ? Object.values(methods) : [];
   for (const entry of entries) visit(entry);
   return weights;
+}
+
+function hasStructuredExactIntent(result: JsonRecord): boolean {
+  return [result.claim_type, result.status].some((value) => {
+    const intent = normalize(value);
+    return intent === "exact" || intent === "optimal" || intent === "verified";
+  });
 }
 
 function rotationsMatch(value: unknown): boolean {

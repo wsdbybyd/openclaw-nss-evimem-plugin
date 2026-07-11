@@ -451,6 +451,42 @@ test("fails closed when the differential profile primitive is absent", (t) => {
   assert.ok(validation.failures.includes("primitive_model_invariants"));
 });
 
+test("caps ambiguous sampling claims below verified without exact intent", (t) => {
+  const validation = validate(t, validResult({
+    status: "completed",
+    claim_type: undefined,
+    proof: { method: "sampling", status: "completed" },
+  }));
+
+  assert.equal(validation.supports_verified_claim, false);
+  assert.equal(validation.recommended_claim_level, "candidate");
+});
+
+test("never verifies an explicitly selected generic artifact profile", (t) => {
+  const validation = validate(t, validResult(), taskContract({
+    verification_profile: { id: "generic_artifact_consistency_v1", claim_mode: "candidate" },
+  }));
+
+  assert.equal(validation.supports_verified_claim, false);
+  assert.equal(validation.recommended_claim_level, "candidate");
+});
+
+test("downgrades unclassified profile check failures to candidate", (t) => {
+  const validation = validate(t, validResult({ scope: "full_cipher" }));
+
+  assert.ok(validation.failures.includes("scope_boundary_present"));
+  assert.equal(validation.recommended_claim_level, "candidate");
+});
+
+test("detects conflicting weights in nested method arrays", (t) => {
+  const validation = validate(t, validResult({
+    methods: [{ runs: [{ weight: 7 }, { weight: 9 }] }],
+  }));
+
+  assert.ok(validation.failures.includes("method_result_conflict_resolved"));
+  assert.equal(validation.supports_verified_claim, false);
+});
+
 test("rejects inconsistent probability and weight", (t) => {
   const validation = validate(t, validResult({ total_weight: 7, probability: "2^-6" }));
   assert.equal(validation.supports_verified_claim, false);

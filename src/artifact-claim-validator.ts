@@ -101,7 +101,8 @@ export function validateArtifactClaims(params: {
   const failures = checks.filter((check) => check.status === "fail").map((check) => check.id);
   const warnings = checks.filter((check) => check.status === "warn").map((check) => check.id);
   const profileCanVerify = profileResolution.ok
-    && profileResolution.profile.selection_source !== "default_generic";
+    && profileResolution.profile.selection_source !== "default_generic"
+    && profileResolution.profile.id !== "generic_artifact_consistency_v1";
   const processSupportsVerifiedClaim = failures.length === 0 && profileCanVerify;
   const claimLevelCap = maximumClaimLevel(result, reportText, profileResolution);
   const supportsVerifiedClaim = processSupportsVerifiedClaim && claimLevelCap === "verified";
@@ -199,7 +200,7 @@ function recommendClaimLevel(
   ].some((id) => failures.has(id))) processLevel = "reject";
   else if (["exactness_evidence_present", "sampling_not_exact_proof", "method_result_conflict_resolved"]
     .some((id) => failures.has(id))) processLevel = "bounded";
-  else if (profileResolution.profile.selection_source === "default_generic") processLevel = "candidate";
+  else if (failures.size > 0 || profileResolution.profile.selection_source === "default_generic") processLevel = "candidate";
   else processLevel = "verified";
   return weakerClaimLevel(processLevel, maximumLevel);
 }
@@ -212,6 +213,8 @@ function maximumClaimLevel(
   const claimType = normalizeText(result.claim_type);
   if (claimType === "candidate") return "candidate";
   if (claimType === "bound" || claimType === "bounded" || profileResolution.profile.claim_mode === "bounded") return "bounded";
+  if (profileResolution.profile.id === "generic_artifact_consistency_v1") return "candidate";
+  if (claimType !== "exact" && claimType !== "optimal" && claimType !== "verified") return "candidate";
   const corpus = normalizeText([stableStringify(result), reportText].join("\n"));
   if (corpus.includes("no verified") || corpus.includes("not verified")) return corpus.includes("candidate") ? "candidate" : "bounded";
   return "verified";
