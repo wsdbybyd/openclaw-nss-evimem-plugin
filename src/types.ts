@@ -107,6 +107,11 @@ export type VerificationProfileResolution = {
   warnings: string[];
 };
 
+export type TaskContractSanitization = {
+  task_contract: TaskContract;
+  warnings: string[];
+};
+
 export type ToolCapability = JsonRecord;
 
 export type ToolCapabilityRecord = {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -114,6 +114,102 @@ test("rejects a profile that is incompatible with the analysis type", (t) => {
   });
   assert.equal(validation.status, "invalid_contract");
   assert.match(validation.reasons.join("\n"), /analysis_type/i);
+});
+
+test("sanitizes forbidden Contract fields before return, logging, and persistence", (t) => {
+  const { root, evidenceDir } = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const forbiddenFields = ["expected_answer", "oracle", "disabled_checks", "severity_overrides"];
+  const forbiddenValues = Object.fromEntries(forbiddenFields.map((field) => [field, true]));
+  const contract = taskContract({
+    ...forbiddenValues,
+    verification_profile: {
+      id: "differential_metric_v1",
+      primitive_profile: "simon_family_v1",
+      claim_mode: "exact_or_honest_bound",
+      ...forbiddenValues,
+    },
+  });
+
+  const validation = validateTaskContract({ task_contract: contract, evidence_dir: evidenceDir });
+  const event = JSON.parse(readFileSync(join(evidenceDir, "contract_validation_events.jsonl"), "utf8").trim());
+  const persisted = JSON.parse(readFileSync(join(evidenceDir, "task_contract.json"), "utf8"));
+
+  assert.equal(validation.status, "valid_contract");
+  for (const field of forbiddenFields) {
+    assert.equal(field in validation.task_contract, false, `result retained top-level ${field}`);
+    assert.equal(field in validation.task_contract.verification_profile, false, `result retained nested ${field}`);
+    assert.equal(field in event.task_contract, false, `event retained top-level ${field}`);
+    assert.equal(field in event.task_contract.verification_profile, false, `event retained nested ${field}`);
+    assert.equal(field in persisted, false, `persisted Contract retained top-level ${field}`);
+    assert.equal(field in persisted.verification_profile, false, `persisted Contract retained nested ${field}`);
+    assert.ok(validation.warnings.includes(`ignored_profile_field:${field}`));
+  }
+});
+
+test("rejects malformed primitive_profile and claim_mode values", (t) => {
+  const malformedFields = [
+    ["primitive_profile", ""],
+    ["primitive_profile", "   "],
+    ["primitive_profile", 7],
+    ["claim_mode", ""],
+    ["claim_mode", "   "],
+    ["claim_mode", false],
+  ];
+
+  for (const [field, value] of malformedFields) {
+    const { root, evidenceDir } = fixture();
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const validation = validateTaskContract({
+      task_contract: taskContract({
+        verification_profile: {
+          id: "differential_metric_v1",
+          primitive_profile: "simon_family_v1",
+          claim_mode: "exact_or_honest_bound",
+          [field]: value,
+        },
+      }),
+      evidence_dir: evidenceDir,
+    });
+    assert.equal(validation.status, "invalid_contract", `${field}=${JSON.stringify(value)}`);
+    assert.match(validation.reasons.join("\n"), new RegExp(field), `${field}=${JSON.stringify(value)}`);
+  }
+});
+
+test("rejects a legacy profile alias with incompatible Contract fields", (t) => {
+  const incompatibleFields = [
+    ["domain", "public_key_cryptanalysis"],
+    ["analysis_type", "linear"],
+    ["cipher", "AES"],
+  ];
+
+  for (const [field, value] of incompatibleFields) {
+    const { root, evidenceDir } = fixture();
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const contract = taskContract({
+      case_id: "CBSC-V2-HARD-SIMON32-DL-SEARCH-002",
+      analysis_type: "differential_linear",
+      verification_profile: undefined,
+      [field]: value,
+    });
+    const validation = validateTaskContract({ task_contract: contract, evidence_dir: evidenceDir });
+    assert.equal(validation.status, "invalid_contract", `${field}=${value}`);
+    assert.match(validation.reasons.join("\n"), new RegExp(field), `${field}=${value}`);
+  }
+});
+
+test("generic fallback resolves an undeclared profile as a candidate", (t) => {
+  const { root, evidenceDir } = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const contract = taskContract({ verification_profile: undefined });
+
+  const validation = validateTaskContract({ task_contract: contract, evidence_dir: evidenceDir });
+
+  assert.equal(validation.status, "valid_contract");
+  assert.equal(validation.verification_profile.id, "generic_artifact_consistency_v1");
+  assert.equal(validation.verification_profile.selection_source, "default_generic");
+  assert.equal(validation.verification_profile.claim_mode, "candidate");
+  assert.ok(validation.warnings.includes("verification_profile_not_declared"));
 });
 
 function validate(t, result, contract = taskContract()) {

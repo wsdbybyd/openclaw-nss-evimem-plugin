@@ -2,6 +2,7 @@ import { isRecord } from "./evidence-store.js";
 import type {
   ResolvedVerificationProfile,
   TaskContract,
+  TaskContractSanitization,
   VerificationProfileRequest,
   VerificationProfileResolution,
 } from "./types.js";
@@ -54,32 +55,59 @@ const PRIMITIVE_DEFINITIONS: Record<string, { cipherPattern: RegExp }> = {
 
 const FORBIDDEN_REQUEST_FIELDS = ["expected_answer", "oracle", "disabled_checks", "severity_overrides"];
 
+export function sanitizeTaskContract(contract: TaskContract): TaskContractSanitization {
+  const taskContract = { ...contract };
+  const warnings = new Set<string>();
+  removeForbiddenFields(taskContract, warnings);
+
+  if (isRecord(taskContract.verification_profile)) {
+    const verificationProfile = { ...taskContract.verification_profile };
+    removeForbiddenFields(verificationProfile, warnings);
+    taskContract.verification_profile = verificationProfile;
+  }
+
+  return { task_contract: taskContract, warnings: [...warnings] };
+}
+
 export function resolveVerificationProfile(contract: TaskContract, caseId?: string): VerificationProfileResolution {
   const raw = contract.verification_profile;
+  let request: VerificationProfileRequest;
+  let selectionSource: ResolvedVerificationProfile["selection_source"];
+  let warnings: string[];
+
   if (raw === undefined) {
     if (normalize(caseId ?? contract.case_id) === "cbsc-v2-hard-simon32-dl-search-002") {
-      return resolved(PROFILE_DEFINITIONS.simon_dl_distinguisher_v1, {
+      request = {
         id: "simon_dl_distinguisher_v1",
         primitive_profile: "simon_family_v1",
         claim_mode: "exact_or_honest_bound",
-      }, "legacy_case_alias", ["legacy_case_profile_alias"]);
+      };
+      selectionSource = "legacy_case_alias";
+      warnings = ["legacy_case_profile_alias"];
+    } else {
+      return resolved(GENERIC_PROFILE, null, "default_generic", ["verification_profile_not_declared"]);
     }
-    return resolved(GENERIC_PROFILE, null, "default_generic", ["verification_profile_not_declared"]);
-  }
-  if (!isRecord(raw) || typeof raw.id !== "string" || raw.id.trim().length === 0) {
+  } else if (!isRecord(raw) || typeof raw.id !== "string" || raw.id.trim().length === 0) {
     return failed("verification_profile must be an object with a non-empty id", "invalid");
-  }
-  const request: VerificationProfileRequest = {
-    id: raw.id,
-    ...(typeof raw.primitive_profile === "string" ? { primitive_profile: raw.primitive_profile } : {}),
-    ...(typeof raw.claim_mode === "string" ? { claim_mode: raw.claim_mode } : {}),
-  };
-  const definition = PROFILE_DEFINITIONS[request.id];
-  if (!definition) {
-    return failed(`unknown verification profile: ${request.id}`, "unsupported", request);
+  } else {
+    request = {
+      id: raw.id,
+      ...(typeof raw.primitive_profile === "string" ? { primitive_profile: raw.primitive_profile } : {}),
+      ...(typeof raw.claim_mode === "string" ? { claim_mode: raw.claim_mode } : {}),
+    };
+    selectionSource = "explicit";
+    warnings = FORBIDDEN_REQUEST_FIELDS
+      .filter((field) => field in raw)
+      .map((field) => `ignored_profile_field:${field}`);
   }
 
-  const invalid: string[] = [];
+  const invalid = raw === undefined ? [] : malformedRequestReasons(raw);
+  const definition = PROFILE_DEFINITIONS[request.id];
+  if (!definition) {
+    const failure = failed(`unknown verification profile: ${request.id}`, "unsupported", request);
+    return { ...failure, invalid_reasons: invalid, warnings };
+  }
+
   validateCompatible("domain", contract.domain, definition.domains, invalid);
   validateCompatible("analysis_type", contract.analysis_type, definition.analysisTypes, invalid);
   validateCompatible("metric", contract.metric, definition.metrics, invalid);
@@ -92,13 +120,12 @@ export function resolveVerificationProfile(contract: TaskContract, caseId?: stri
     invalid.push(`primitive_profile is incompatible with cipher: ${primitive}`);
   }
 
-  const warnings = FORBIDDEN_REQUEST_FIELDS.filter((field) => field in raw).map((field) => `ignored_profile_field:${field}`);
   const profile: ResolvedVerificationProfile = {
     id: definition.id,
     version: definition.version,
     primitive_profile: primitive,
     claim_mode: claimMode,
-    selection_source: "explicit",
+    selection_source: selectionSource,
   };
   return { ok: invalid.length === 0, requested: request, profile, invalid_reasons: invalid, unsupported_reasons: [], warnings };
 }
@@ -142,6 +169,25 @@ function validateCompatible(field: string, value: unknown, supported: string[], 
     return;
   }
   if (!supported.includes(value)) reasons.push(`${field} is incompatible with verification profile: ${value}`);
+}
+
+function malformedRequestReasons(raw: Record<string, unknown>): string[] {
+  const reasons: string[] = [];
+  for (const field of ["primitive_profile", "claim_mode"] as const) {
+    if (field in raw && (typeof raw[field] !== "string" || raw[field].trim().length === 0)) {
+      reasons.push(`${field} must be a non-empty string`);
+    }
+  }
+  return reasons;
+}
+
+function removeForbiddenFields(record: Record<string, unknown>, warnings: Set<string>): void {
+  for (const field of FORBIDDEN_REQUEST_FIELDS) {
+    if (field in record) {
+      delete record[field];
+      warnings.add(`ignored_profile_field:${field}`);
+    }
+  }
 }
 
 function normalize(value: unknown): string {
