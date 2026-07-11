@@ -213,6 +213,7 @@ function maximumClaimLevel(
   const claimType = normalizeText(result.claim_type);
   if (claimType === "candidate") return "candidate";
   if (claimType === "bound" || claimType === "bounded" || profileResolution.profile.claim_mode === "bounded") return "bounded";
+  if (profileResolution.profile.id === "simon_dl_distinguisher_v1" && claimType === "verified_distinguisher") return "verified";
   if (profileResolution.profile.id === "generic_artifact_consistency_v1") return "candidate";
   if (claimType !== "exact" && claimType !== "optimal" && claimType !== "verified") return "candidate";
   const corpus = normalizeText([stableStringify(result), reportText].join("\n"));

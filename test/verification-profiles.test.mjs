@@ -471,6 +471,32 @@ test("never verifies an explicitly selected generic artifact profile", (t) => {
   assert.equal(validation.recommended_claim_level, "candidate");
 });
 
+test("preserves verified SIMON-DL claim intent for the legacy profile alias", (t) => {
+  const { root, evidenceDir, sourcePath } = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(sourcePath, "x ^ round_keys[i]\nc = 0xfffc\n", "utf8");
+  const contract = taskContract({
+    case_id: "CBSC-V2-HARD-SIMON32-DL-SEARCH-002",
+    analysis_type: "differential_linear",
+    verification_profile: undefined,
+  });
+  const validation = validateArtifactClaims({
+    task_contract: contract,
+    result: {
+      claim_type: "verified_distinguisher",
+      delta_in_words: [0, 1],
+      gamma_out_words: [2, 3],
+      measurement: "signed_sum",
+      decompositions: "(5,5,4) (5,6,3) (7,3,4)",
+    },
+    source_paths: [sourcePath],
+    evidence_dir: evidenceDir,
+  });
+
+  assert.equal(validation.supports_verified_claim, true);
+  assert.equal(validation.recommended_claim_level, "verified");
+});
+
 test("downgrades unclassified profile check failures to candidate", (t) => {
   const validation = validate(t, validResult({ scope: "full_cipher" }));
 
