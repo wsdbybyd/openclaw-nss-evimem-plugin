@@ -102,8 +102,10 @@ export function validateArtifactClaims(params: {
   const warnings = checks.filter((check) => check.status === "warn").map((check) => check.id);
   const profileCanVerify = profileResolution.ok
     && profileResolution.profile.selection_source !== "default_generic";
-  const supportsVerifiedClaim = failures.length === 0 && profileCanVerify;
-  const recommendedClaimLevel = recommendClaimLevel(checks, profileResolution, supportsVerifiedClaim);
+  const processSupportsVerifiedClaim = failures.length === 0 && profileCanVerify;
+  const claimLevelCap = maximumClaimLevel(result, reportText, profileResolution);
+  const supportsVerifiedClaim = processSupportsVerifiedClaim && claimLevelCap === "verified";
+  const recommendedClaimLevel = recommendClaimLevel(checks, profileResolution, supportsVerifiedClaim, claimLevelCap);
   const status = failures.length > 0 ? "failed" : warnings.length > 0 ? "warning" : "passed";
 
   const validationPath = join(evidenceDir, "artifact_claim_validation.json");
@@ -181,9 +183,11 @@ function recommendClaimLevel(
   checks: ArtifactClaimCheck[],
   profileResolution: VerificationProfileResolution,
   supportsVerifiedClaim: boolean,
+  maximumLevel: RecommendedClaimLevel,
 ): RecommendedClaimLevel {
   if (supportsVerifiedClaim) return "verified";
   const failures = new Set(checks.filter((item) => item.status === "fail").map((item) => item.id));
+  let processLevel: RecommendedClaimLevel;
   if ([
     "result_claim_consistency",
     "result_artifact_readable",
@@ -192,11 +196,30 @@ function recommendClaimLevel(
     "differential_nontrivial_weight",
     "probability_weight_consistency",
     "primitive_model_invariants",
-  ].some((id) => failures.has(id))) return "reject";
-  if (["exactness_evidence_present", "sampling_not_exact_proof", "method_result_conflict_resolved"]
-    .some((id) => failures.has(id))) return "bounded";
-  if (profileResolution.profile.selection_source === "default_generic") return "candidate";
-  return "candidate";
+  ].some((id) => failures.has(id))) processLevel = "reject";
+  else if (["exactness_evidence_present", "sampling_not_exact_proof", "method_result_conflict_resolved"]
+    .some((id) => failures.has(id))) processLevel = "bounded";
+  else if (profileResolution.profile.selection_source === "default_generic") processLevel = "candidate";
+  else processLevel = "verified";
+  return weakerClaimLevel(processLevel, maximumLevel);
+}
+
+function maximumClaimLevel(
+  result: JsonRecord,
+  reportText: string,
+  profileResolution: VerificationProfileResolution,
+): RecommendedClaimLevel {
+  const claimType = normalizeText(result.claim_type);
+  if (claimType === "candidate") return "candidate";
+  if (claimType === "bound" || claimType === "bounded" || profileResolution.profile.claim_mode === "bounded") return "bounded";
+  const corpus = normalizeText([stableStringify(result), reportText].join("\n"));
+  if (corpus.includes("no verified") || corpus.includes("not verified")) return corpus.includes("candidate") ? "candidate" : "bounded";
+  return "verified";
+}
+
+function weakerClaimLevel(left: RecommendedClaimLevel, right: RecommendedClaimLevel): RecommendedClaimLevel {
+  const rank: Record<RecommendedClaimLevel, number> = { reject: 0, candidate: 1, bounded: 2, verified: 3 };
+  return rank[left] <= rank[right] ? left : right;
 }
 
 function simonDlChecks(

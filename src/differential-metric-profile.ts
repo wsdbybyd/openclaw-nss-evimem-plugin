@@ -7,7 +7,7 @@ export function differentialMetricChecks(params: {
   reportText: string;
   sourceText: string;
   readableSourceCount: number;
-  primitiveProfile: string | null;
+  primitiveProfile?: string | null;
 }): ArtifactClaimCheck[] {
   const { taskContract, result, reportText, sourceText, readableSourceCount, primitiveProfile } = params;
   const corpus = normalize([stableStringify(result), reportText, sourceText].join("\n"));
@@ -15,7 +15,7 @@ export function differentialMetricChecks(params: {
   const probability = parseProbability(firstValue(result, ["probability", "maximum_differential_probability"]));
   const exactClaim = ["optimal", "exact", "verified"].some((token) => corpus.includes(token));
   const inputWords = firstNumberArray(result, ["input_difference_words", "delta_in_words"]);
-  const nonzeroInput = inputWords ? inputWords.some((value) => value !== 0) : hasNonzeroFirstTrailState(result.trail);
+  const nonzeroInput = inputWords ? inputWords.some((value) => value !== 0) : hasNonzeroDifference(result) || hasNonzeroFirstTrailDifference(result.trail);
   const rounds = firstNumber(taskContract, ["rounds"]);
   const trail = Array.isArray(result.trail) ? result.trail : null;
   const claimType = normalize(result.claim_type);
@@ -28,18 +28,20 @@ export function differentialMetricChecks(params: {
     || formalProof
     || completeCoverage
     || sourceReference;
-  const independentEvidenceForSampling = formalProof || completeCoverage || sourceReference;
   const samplingProof = /sampling|random|monte_carlo/.test(proofMethod);
   const simon = primitiveProfile === "simon_family_v1";
-  const zeroClaim = simon && (rounds ?? 0) > 1 && nonzeroInput && exactClaim
-    && (weight === 0 || probability === 1);
+  const independentEvidenceForSampling = (formalProof && !samplingProof)
+    || hasIndependentCoverage(result.coverage)
+    || hasIndependentSourceReference(result.source_reference);
+  const zeroClaim = !simon || ((rounds ?? 0) > 1 && nonzeroInput && exactClaim
+    && (weight === 0 || probability === 1));
   const model = isRecord(result.model) ? result.model : {};
   const simon32 = isSimon32(taskContract, result);
-  const stateWordsValid = numberValue(model.state_words) === 2 || sourceHasStateWords(sourceText);
-  const wordSizeValid = !simon32 || numberValue(model.word_size_bits) === 16 || sourceHasWordSize(sourceText);
-  const rotationsValid = rotationsMatch(model.rotations) || sourceHasRotations(sourceText);
+  const stateWordsValid = model.state_words === undefined ? sourceHasStateWords(sourceText) : numberValue(model.state_words) === 2;
+  const wordSizeValid = !simon32 || (model.word_size_bits === undefined ? sourceHasWordSize(sourceText) : numberValue(model.word_size_bits) === 16);
+  const rotationsValid = model.rotations === undefined ? sourceHasRotations(sourceText) : rotationsMatch(model.rotations);
   const sourceSupportsModel = sourceHasStateWords(sourceText) || sourceHasWordSize(sourceText) || sourceHasRotations(sourceText);
-  const modelInvariants = !simon || (stateWordsValid && wordSizeValid && rotationsValid && model.exclude_zero_input === true);
+  const modelInvariants = simon && stateWordsValid && wordSizeValid && rotationsValid && model.exclude_zero_input === true;
   const methodValues = collectMethodWeights(result.methods);
   const conflictResolved = methodValues.size <= 1
     || hasNonEmptyValue(result.conflict_resolution)
@@ -53,7 +55,7 @@ export function differentialMetricChecks(params: {
   return [
     check("required_artifacts_readable", Object.keys(result).length > 0 && readableSourceCount > 0, "high", "The profile requires a nonempty structured result and at least one readable source artifact.", `readable_source_count=${readableSourceCount}`),
     check("task_boundary_preserved", taskBoundaryMatches(taskContract, result), "high", "Result metadata must preserve the task Contract boundary."),
-    check("scope_boundary_present", hasNonEmptyValue(result.scope) || (typeof taskContract.scope === "string" && corpus.includes(normalize(taskContract.scope))), "medium", "The artifact must declare the analysis scope."),
+    check("scope_boundary_present", scopeMatchesContract(taskContract.scope, result.scope, corpus), "medium", "The artifact scope must be present and must not expand the Contract scope."),
     check("differential_nonzero_input", nonzeroInput, "high", "Differential claims require a nonzero input difference."),
     check("differential_nontrivial_weight", !zeroClaim && (weight !== null || probability !== null), zeroClaim ? "high" : "medium", "Differential claims must provide either weight or probability, and exact multi-round SIMON claims must not report zero weight or probability one for a nonzero input.", weight === null ? undefined : `weight=${weight}`),
     check("probability_weight_consistency", weight === null || probability === null || Math.abs(probability - 2 ** -weight) <= 1e-9, "high", "Probability and weight must agree when both are present."),
@@ -111,18 +113,26 @@ function parseProbability(value: unknown): number | null {
   return match ? 2 ** Number(match[1]) : null;
 }
 
-function hasNonzeroFirstTrailState(trail: unknown): boolean {
+function hasNonzeroFirstTrailDifference(trail: unknown): boolean {
   if (!Array.isArray(trail) || !isRecord(trail[0])) return false;
-  return containsNonzeroNumber(trail[0]);
+  return hasNonzeroDifference(trail[0]);
 }
 
-function containsNonzeroNumber(value: unknown): boolean {
-  if (typeof value === "number") return value !== 0;
-  if (Array.isArray(value)) return value.some(containsNonzeroNumber);
-  if (isRecord(value)) return Object.entries(value)
-    .filter(([key]) => /input|delta|state|difference/i.test(key))
-    .some(([, nested]) => containsNonzeroNumber(nested));
-  return false;
+function hasNonzeroDifference(record: JsonRecord): boolean {
+  return Object.entries(record)
+    .filter(([key]) => isDifferenceField(key))
+    .some(([, value]) => containsNonzeroDifferenceValue(value));
+}
+
+function isDifferenceField(key: string): boolean {
+  return ["input_difference_words", "delta_in_words", "input_difference", "delta_in", "input_diff", "dx", "dy", "dl", "dr"]
+    .some((field) => key.toLowerCase() === field || key.toLowerCase() === `${field}_int`);
+}
+
+function containsNonzeroDifferenceValue(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsNonzeroDifferenceValue);
+  const numeric = numberValue(value);
+  return numeric !== null && numeric !== 0;
 }
 
 function taskBoundaryMatches(contract: TaskContract, result: JsonRecord): boolean {
@@ -142,7 +152,8 @@ function collectMethodWeights(methods: unknown): Set<number> {
     }
     for (const nested of Object.values(value)) visit(nested);
   };
-  if (isRecord(methods)) for (const entry of Object.values(methods)) visit(entry);
+  const entries = Array.isArray(methods) ? methods : isRecord(methods) ? Object.values(methods) : [];
+  for (const entry of entries) visit(entry);
   return weights;
 }
 
@@ -169,6 +180,33 @@ function isSimon32(contract: TaskContract, result: JsonRecord): boolean {
 
 function hasNonEmptyValue(value: unknown): boolean {
   return (typeof value === "string" && value.trim().length > 0) || (isRecord(value) && Object.keys(value).length > 0);
+}
+
+function hasIndependentCoverage(value: unknown): boolean {
+  return isRecord(value)
+    && normalize(value.status) === "complete"
+    && normalize(value.method) === "exhaustive"
+    && value.independent_from_sampling === true;
+}
+
+function hasIndependentSourceReference(value: unknown): boolean {
+  if (!isRecord(value) || value.independent !== true) return false;
+  const kind = normalize(value.kind ?? value.source_type);
+  const recognizedKind = kind === "literature" || kind === "independent_reproduction";
+  return recognizedKind && hasNonEmptyValue(value.locator ?? value.citation);
+}
+
+function scopeMatchesContract(contractScope: unknown, resultScope: unknown, corpus: string): boolean {
+  if (typeof contractScope !== "string" || contractScope.trim().length === 0) return hasNonEmptyValue(resultScope);
+  if (typeof resultScope !== "string" || resultScope.trim().length === 0) return corpus.includes(normalize(contractScope));
+  const contract = normalizeScope(contractScope);
+  const result = normalizeScope(resultScope);
+  if (contract === "reducedround") return result.includes("reducedround") && !result.includes("fullround") && !result.includes("fullcipher");
+  return result === contract;
+}
+
+function normalizeScope(value: unknown): string {
+  return normalize(value).replace(/[\s_-]/g, "");
 }
 
 function normalize(value: unknown): string {

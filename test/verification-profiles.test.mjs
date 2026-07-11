@@ -338,10 +338,117 @@ test("allows declared-round exact evidence without a trail", (t) => {
 test("accepts sampling when independent exactness evidence is present", (t) => {
   const validation = validate(t, validResult({
     proof: { method: "sampling", status: "completed" },
-    coverage: { status: "complete" },
+    coverage: { status: "complete", method: "exhaustive", independent_from_sampling: true },
   }));
 
   assert.equal(validation.failures.includes("sampling_not_exact_proof"), false);
+});
+
+test("caps candidate and bounded claim declarations below verified", (t) => {
+  const candidate = validate(t, validResult({
+    claim_type: "candidate",
+    methods: { exhaustive: { weight: 7 }, reproduction: { weight: 9 } },
+  }));
+  const bounded = validate(t, validResult({ claim_type: "bound" }));
+  const profileBounded = validate(t, validResult(), taskContract({
+    verification_profile: {
+      id: "differential_metric_v1",
+      primitive_profile: "simon_family_v1",
+      claim_mode: "bounded",
+    },
+  }));
+
+  assert.equal(candidate.supports_verified_claim, false);
+  assert.equal(candidate.recommended_claim_level, "candidate");
+  assert.equal(bounded.supports_verified_claim, false);
+  assert.equal(bounded.recommended_claim_level, "bounded");
+  assert.equal(profileBounded.supports_verified_claim, false);
+  assert.equal(profileBounded.recommended_claim_level, "bounded");
+});
+
+test("caps unverified result language below verified", (t) => {
+  const validation = validate(t, validResult({ conclusion: "not verified" }));
+
+  assert.equal(validation.supports_verified_claim, false);
+  assert.equal(validation.recommended_claim_level, "bounded");
+});
+
+test("rejects sampling provenance asserted only by a bare source reference or coverage", (t) => {
+  const sourceReference = validate(t, validResult({
+    proof: { method: "sampling", status: "optimal" },
+    source_reference: "this same sampling run",
+  }));
+  const coverage = validate(t, validResult({
+    proof: { method: "sampling", status: "optimal" },
+    coverage: { status: "complete" },
+  }));
+
+  assert.ok(sourceReference.failures.includes("sampling_not_exact_proof"));
+  assert.ok(coverage.failures.includes("sampling_not_exact_proof"));
+});
+
+test("rejects scope expansion beyond the Contract", (t) => {
+  const validation = validate(t, validResult({ scope: "full_cipher" }));
+
+  assert.ok(validation.failures.includes("scope_boundary_present"));
+});
+
+test("detects conflicting weights in method arrays", (t) => {
+  const validation = validate(t, validResult({
+    methods: [{ weight: 7 }, { verified_weight: 9 }],
+  }));
+
+  assert.ok(validation.failures.includes("method_result_conflict_resolved"));
+});
+
+test("does not treat state metadata as a nonzero input difference", (t) => {
+  const validation = validate(t, validResult({
+    input_difference_words: undefined,
+    trail: Array.from({ length: 10 }, (_, index) => ({
+      round: index + 1,
+      state_words: 2,
+      weight: index < 7 ? 1 : 0,
+    })),
+  }));
+
+  assert.ok(validation.failures.includes("differential_nonzero_input"));
+});
+
+test("accepts nonzero input differences encoded as hexadecimal or binary", (t) => {
+  const hexadecimal = validate(t, validResult({ input_difference_words: undefined, dx: "0x1", dy: "0x0" }));
+  const binary = validate(t, validResult({ input_difference_words: undefined, input_diff: "0b10" }));
+
+  assert.equal(hexadecimal.failures.includes("differential_nonzero_input"), false);
+  assert.equal(binary.failures.includes("differential_nonzero_input"), false);
+});
+
+test("rejects explicit contradictory structured model fields despite source literals", (t) => {
+  const cases = [
+    { state_words: 3, word_size_bits: 16, rotations: [1, 8, 2], exclude_zero_input: true },
+    { state_words: 2, word_size_bits: 8, rotations: [1, 8, 2], exclude_zero_input: true },
+    { state_words: 2, word_size_bits: 16, rotations: [1, 2, 8], exclude_zero_input: true },
+  ];
+
+  for (const model of cases) {
+    const validation = validate(t, validResult({ model }));
+    assert.ok(validation.failures.includes("primitive_model_invariants"));
+  }
+});
+
+test("fails closed when the differential profile primitive is absent", (t) => {
+  const contract = taskContract({
+    cipher: "AES",
+    verification_profile: { id: "differential_metric_v1", claim_mode: "exact_or_honest_bound" },
+  });
+  const validation = validate(t, validResult({
+    cipher: "AES",
+    total_weight: 0,
+    probability: 1,
+    trail: Array.from({ length: 10 }, (_, index) => ({ round: index + 1, weight: 0 })),
+  }), contract);
+
+  assert.ok(validation.failures.includes("differential_nontrivial_weight"));
+  assert.ok(validation.failures.includes("primitive_model_invariants"));
 });
 
 test("rejects inconsistent probability and weight", (t) => {
