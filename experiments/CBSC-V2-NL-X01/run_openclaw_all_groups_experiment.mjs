@@ -17,8 +17,9 @@ const experimentDir = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const repoRoot = resolve(experimentDir, "..", "..");
 const workspaceRoot = resolve(process.env.NSS_EVIMEM_WORKSPACE_ROOT ?? resolve(repoRoot, ".."));
 const runDir = join(experimentDir, "runs", "openclaw-all-groups-isolated-latest");
-const workspaceIsolationBase = process.env.NSS_EVIMEM_ISOLATED_WORKSPACE_BASE
-  ?? "C:\\Users\\wsdbybyd\\.openclaw\\workspace-isolated";
+const workspaceIsolationBase = resolve(process.env.NSS_EVIMEM_ISOLATED_WORKSPACE_BASE
+  ?? "C:\\Users\\wsdbybyd\\.openclaw\\workspace-isolated");
+const workspaceIsolationRoot = join(workspaceIsolationBase, "cbsc_v2_nl_x01_all_groups_isolated_latest");
 const benchmarkQuestionPath = resolve(workspaceRoot, "v4版本benchmark", "tasks", CASE_ID, "public", "question.md");
 const hiddenOraclePath = resolve(workspaceRoot, "v4版本benchmark", "tasks", CASE_ID, "hidden", "oracle.json");
 const memoryPackDir = resolve(process.env.NSS_EVIMEM_MEMORY_PACK_DIR ?? resolve(workspaceRoot, "hook学习", "automated_crypto_modeling_evidence_memory_24papers"));
@@ -96,18 +97,6 @@ const defaultCapability = {
   ],
 };
 
-const isolatedWorkspacePersistentEntries = new Set([
-  ".git",
-  ".openclaw",
-  "AGENTS.md",
-  "BOOTSTRAP.md",
-  "HEARTBEAT.md",
-  "IDENTITY.md",
-  "SOUL.md",
-  "TOOLS.md",
-  "USER.md",
-]);
-
 function assertInside(parent, child) {
   const rel = relative(resolve(parent), resolve(child));
   if (rel === "" || (!rel.startsWith("..") && !rel.includes(":"))) {
@@ -124,36 +113,8 @@ function resetDirectory(parent, path) {
   mkdirSync(path, { recursive: true });
 }
 
-function removePathInside(parent, path) {
-  assertInside(parent, path);
-  if (existsSync(path)) {
-    rmSync(path, { recursive: true, force: true });
-  }
-}
-
 function resetIsolatedWorkspaceRoot() {
-  mkdirSync(workspaceIsolationBase, { recursive: true });
-  const removedEntries = [];
-  for (const entry of [
-    "question.md",
-    "work",
-    "evidence",
-    "cbsc_v2_nl_x01_all_groups_isolated_latest",
-  ]) {
-    const entryPath = join(workspaceIsolationBase, entry);
-    if (existsSync(entryPath)) {
-      removePathInside(workspaceIsolationBase, entryPath);
-      removedEntries.push(entry);
-    }
-  }
-  for (const entry of readdirSync(workspaceIsolationBase)) {
-    if (isolatedWorkspacePersistentEntries.has(entry)) {
-      continue;
-    }
-    removePathInside(workspaceIsolationBase, join(workspaceIsolationBase, entry));
-    removedEntries.push(entry);
-  }
-  return removedEntries.sort();
+  resetDirectory(workspaceIsolationBase, workspaceIsolationRoot);
 }
 
 function writeJson(path, value) {
@@ -242,7 +203,7 @@ function cleanupArmProcesses({ startedAtIso, armWorkspaceRoot }) {
     "  ($_.Name -eq 'python.exe' -or $_.Name -eq 'py.exe') -and",
     "  $_.CommandLine -and",
     "  ([datetime]$_.CreationDate -ge $started) -and",
-    "  ($_.CommandLine -like '*simon32*' -or $_.CommandLine -like '*work/artifacts*' -or $_.CommandLine -like '*work\\\\artifacts*' -or $_.CommandLine.Contains($fragment))",
+    "  $_.CommandLine.Contains($fragment)",
     "}",
     "$targets | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }",
     "$targets | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress",
@@ -314,17 +275,6 @@ function parseOpenClawPayloadText(stdout) {
   } catch {
     return stdout;
   }
-}
-
-function collectTextFromFiles(dir) {
-  return listFiles(dir)
-    .filter((file) => /\.(md|txt|json|jsonl|py|log)$/i.test(file))
-    .map((file) => {
-      const full = join(dir, file);
-      const text = readTextIfExists(full);
-      return `\n\n--- FILE ${file} ---\n${text.slice(0, 25000)}`;
-    })
-    .join("");
 }
 
 function readJsonl(path) {
@@ -481,18 +431,41 @@ function collectSourcePaths(root) {
     .map((file) => join(root, file));
 }
 
-function hasExactProbability(text) {
-  return /2\s*\^\s*-?\s*25\b/i.test(text)
-    || /2\s*\^\s*\(\s*-25\s*\)/i.test(text)
-    || /2\s*\*\*\s*-25\b/i.test(text)
-    || /2\^\{-25\}/i.test(text)
-    || /probability[^.\n]{0,80}-25/i.test(text);
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function hasExactWeight(text) {
-  return /(differential\s*)?weight[^0-9\n]{0,40}25(\.0)?\b/i.test(text)
-    || /minimum[^0-9\n]{0,80}25(\.0)?\b/i.test(text)
-    || /权重[^0-9\n]{0,20}25(\.0)?\b/i.test(text);
+function powerOfTwoExponent(probability) {
+  const match = String(probability ?? "").trim().match(/^2\s*(?:\^|\*\*)\s*(?:\{|\()?\s*-\s*(\d+(?:\.\d+)?)\s*(?:\}|\))?$/i);
+  return match?.[1] ?? null;
+}
+
+function normalizedMetric(value) {
+  return String(value ?? "")
+    .replace(/\s+/g, "")
+    .replace(/\*\*/g, "^")
+    .replace(/[{}()]/g, "")
+    .toLowerCase();
+}
+
+function hasExactProbability(text, expectedProbability) {
+  const exponent = powerOfTwoExponent(expectedProbability);
+  if (!exponent) {
+    const expected = normalizedMetric(expectedProbability);
+    return expected.length > 0 && normalizedMetric(text).includes(expected);
+  }
+  const expectedExponent = escapeRegExp(exponent);
+  return new RegExp(`2\\s*(?:\\^|\\*\\*)\\s*(?:\\{\\s*|\\(\\s*)?-\\s*${expectedExponent}(?:\\s*\\}|\\s*\\))?(?![\\d.])`, "i").test(text);
+}
+
+function hasExactWeight(text, expectedWeight) {
+  const numericWeight = Number(expectedWeight);
+  const expected = Number.isInteger(numericWeight)
+    ? `${escapeRegExp(String(expectedWeight))}(?:\\.0+)?`
+    : escapeRegExp(String(expectedWeight));
+  return new RegExp(`(?:differential\\s*)?weight[^0-9\\n]{0,40}${expected}(?![0-9.])`, "i").test(text)
+    || new RegExp(`minimum[^0-9\\n]{0,80}${expected}(?![0-9.])`, "i").test(text)
+    || new RegExp(`权重[^0-9\\n]{0,20}${expected}(?![0-9.])`, "i").test(text);
 }
 
 function hasInstanceBoundary(text) {
@@ -501,9 +474,8 @@ function hasInstanceBoundary(text) {
     && /(differential|差分)/i.test(text);
 }
 
-function hasMethodEvidence(text, outputFiles) {
+function hasMethodEvidence(text) {
   return /SunWangWang2021|Sun\s*Wang\s*Wang|Table\s*9|MILP|SAT|SMT|solver|script|literature|source|reproduction|论文|表\s*9/i.test(text)
-    || outputFiles.some((file) => /\.(py|sage|smt2|lp|mps|log|json)$/i.test(file));
 }
 
 function claimBoundaryOk(text) {
@@ -536,39 +508,51 @@ function detectCrossArmContamination(arm, evidenceDir) {
   return { detected: hits.length > 0, hits };
 }
 
+function isAgentTimeout(commandResult, payloadText) {
+  return /Request timed out|ETIMEDOUT|timeout/i.test(payloadText)
+    || /ETIMEDOUT|timeout/i.test(commandResult.error ?? "");
+}
+
+function hasFullInterventionProtocolEvidence(evidenceDir) {
+  return hasValidContract(evidenceDir)
+    && hasGuardAllow(evidenceDir)
+    && existsSync(join(evidenceDir, "tool_capabilities.json"));
+}
+
 function evaluateArm({ arm, commandResult, stdoutPath, workspaceOutputDir, evidenceDir, oracle, importResult, artifactValidation }) {
   const stdout = readTextIfExists(stdoutPath);
   const payloadText = parseOpenClawPayloadText(stdout);
-  const fileText = collectTextFromFiles(workspaceOutputDir);
-  const evidenceText = collectTextFromFiles(evidenceDir);
-  const combinedText = `${payloadText}\n${fileText}\n${evidenceText}`;
+  const finalAnswerText = readTextIfExists(join(workspaceOutputDir, "final_answer.md"));
+  const answerText = `${payloadText}\n${finalAnswerText}`;
   const outputFiles = listFiles(workspaceOutputDir);
   const expectedProbability = oracle.oracle_answer.probability;
   const expectedWeight = oracle.oracle_answer.primary_weight;
-  const exactProbabilityMatch = hasExactProbability(combinedText);
-  const exactWeightMatch = hasExactWeight(combinedText);
+  const exactProbabilityMatch = hasExactProbability(answerText, expectedProbability);
+  const exactWeightMatch = hasExactWeight(answerText, expectedWeight);
   const exactMetricMatch = exactProbabilityMatch || exactWeightMatch;
-  const instancePreserved = hasInstanceBoundary(combinedText);
-  const methodEvidence = hasMethodEvidence(combinedText, outputFiles);
-  const boundaryOk = claimBoundaryOk(combinedText);
-  const timeoutText = /Request timed out|ETIMEDOUT|timeout/i.test(combinedText)
-    || commandResult.error === "spawnSync node.exe ETIMEDOUT";
+  const instancePreserved = hasInstanceBoundary(answerText);
+  const methodEvidence = hasMethodEvidence(answerText);
+  const boundaryOk = claimBoundaryOk(answerText);
+  const timeoutText = isAgentTimeout(commandResult, payloadText);
 
   const toolCalls = countJsonl(join(evidenceDir, "tool_calls.jsonl"));
   const memoryRecords = readJsonIfExists(join(evidenceDir, "memory_records.json"));
   const memoryCount = Array.isArray(memoryRecords) ? memoryRecords.length : 0;
-  const nssToolUsageDetected = /nss_evimem_/i.test(combinedText) || toolCalls > 0;
+  const nssToolUsageDetected = /nss_evimem_/i.test(answerText) || toolCalls > 0;
   const contractValid = hasValidContract(evidenceDir);
   const guardAllow = hasGuardAllow(evidenceDir);
   const capabilityRecorded = existsSync(join(evidenceDir, "tool_capabilities.json"));
   const artifactValidationRecorded = existsSync(join(evidenceDir, "artifact_claim_validation.json"));
   const failureDiagnosisRecorded = existsSync(join(evidenceDir, "failure_diagnosis.json"));
   const crossArmContamination = detectCrossArmContamination(arm, evidenceDir);
+  const fullInterventionRequirementsMet = !arm.fullIntervention || (
+    contractValid && guardAllow && capabilityRecorded && artifactValidation?.supports_verified_claim === true
+  );
 
   let finalCorrectness = "not_evaluable";
   if ((commandResult.status !== 0 || timeoutText) && !exactMetricMatch) {
     finalCorrectness = "agent_run_failed";
-  } else if (exactMetricMatch && instancePreserved && methodEvidence && boundaryOk) {
+  } else if (exactMetricMatch && instancePreserved && methodEvidence && boundaryOk && fullInterventionRequirementsMet) {
     finalCorrectness = "verified_correct";
   } else if (exactMetricMatch) {
     finalCorrectness = "answer_matches_oracle_with_weak_evidence";
@@ -713,8 +697,9 @@ const results = {};
 try {
   for (const arm of arms) {
     const armRunDir = join(runDir, arm.mode);
-    const removedRootEntries = resetIsolatedWorkspaceRoot();
-    const armWorkspaceRoot = workspaceIsolationBase;
+    const armWorkspaceRoot = join(workspaceIsolationRoot, arm.mode);
+    const armWorkspaceExisted = existsSync(armWorkspaceRoot);
+    resetDirectory(workspaceIsolationRoot, armWorkspaceRoot);
     const armWorkspaceDir = join(armWorkspaceRoot, "work");
     const evidenceDir = join(armWorkspaceRoot, "evidence");
     mkdirSync(armRunDir, { recursive: true });
@@ -767,7 +752,7 @@ try {
     });
 
     let artifactValidation = null;
-    if (arm.fullIntervention) {
+    if (arm.fullIntervention && hasFullInterventionProtocolEvidence(evidenceDir)) {
       artifactValidation = await postprocessFullIntervention({
         workspaceOutputDir: armWorkspaceDir,
         evidenceDir,
@@ -779,10 +764,11 @@ try {
     copyDirectoryIfExists(evidenceDir, join(armRunDir, "evidence"));
     writeJson(join(armRunDir, "workspace_isolation.json"), {
       arm_workspace_root: armWorkspaceRoot,
+      workspace_isolation_root: workspaceIsolationRoot,
       arm_work_dir: armWorkspaceDir,
       evidence_dir: evidenceDir,
       started_at: armStartedAtIso,
-      root_entries_removed_before_start: removedRootEntries,
+      arm_workspace_reset_before_start: armWorkspaceExisted,
     });
     writeJson(join(armRunDir, "process_cleanup.json"), cleanupResult);
 
@@ -821,6 +807,7 @@ const summary = {
   model,
   openclaw_entry: openclawMjs,
   workspace_isolation_base: workspaceIsolationBase,
+  workspace_isolation_root: workspaceIsolationRoot,
   oracle_expected: {
     probability: oracle.oracle_answer.probability,
     weight: oracle.oracle_answer.primary_weight,
@@ -894,7 +881,7 @@ const report = [
   "## Interpretation",
   "",
   "This NL-X01 task is metric-level and easier than the previous Simon32 differential-linear search case.",
-  "The evaluator labels `verified_correct` when the visible answer preserves the instance, reports `2^-25` or weight `25`, provides method/source evidence, and avoids full-cipher overclaiming.",
+  "The evaluator labels `verified_correct` when the visible answer preserves the instance, matches the offline oracle metric, provides method/source evidence, and avoids full-cipher overclaiming.",
   `Best verified group: \`${summary.best_group ?? "none"}\``,
   "",
 ].join("\n");

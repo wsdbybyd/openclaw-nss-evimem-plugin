@@ -20,6 +20,19 @@ function readText(path) {
   return readFileSync(path, "utf8");
 }
 
+function collectStringValues(value) {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(collectStringValues);
+  }
+  if (value && typeof value === "object") {
+    return Object.values(value).flatMap(collectStringValues);
+  }
+  return [];
+}
+
 function assertFile(path) {
   if (!existsSync(path)) {
     throw new Error(`Missing expected NL-X01 all-groups experiment file: ${path}`);
@@ -56,6 +69,11 @@ const evaluations = Object.fromEntries(
 );
 const artifactValidation = readJson(join(runDir, "full_intervention", "evidence", "artifact_claim_validation.json"));
 const artifactTaskContract = JSON.stringify(artifactValidation.task_contract ?? null);
+const oracleValues = [...new Set(collectStringValues(summary.oracle_expected).filter((value) => value.trim()))];
+const fullIntervention = evaluations.full_intervention;
+const fullInterventionProtocolEvidence = fullIntervention.contract_valid === true
+  && fullIntervention.tool_semantic_match === true
+  && fullIntervention.tool_capability_recorded === true;
 
 const allowedCorrectness = [
   "verified_correct",
@@ -84,7 +102,10 @@ const checks = {
   fullInterventionUsesDifferentialProfile: artifactValidation.verification_profile?.id === "differential_metric_v1",
   artifactValidationSeparatesOracle: artifactValidation.verification_scope === "evidence_eligibility_not_oracle_correctness",
   fullInterventionClaimLevelRecorded: ["verified", "bounded", "candidate", "reject"].includes(artifactValidation.recommended_claim_level),
-  oracleRemainsOffline: !artifactTaskContract.includes(summary.oracle_expected?.probability),
+  oracleRemainsOffline: oracleValues.every((value) => !artifactTaskContract.includes(value)),
+  fullInterventionProtocolEvidence,
+  fullInterventionVerifiedClaimGated: fullIntervention.final_correctness !== "verified_correct"
+    || (fullInterventionProtocolEvidence && artifactValidation.supports_verified_claim === true),
   reportMentionsAllGroups: /Baseline/i.test(report)
     && /Evidence-only/i.test(report)
     && /Contract\+Capability/i.test(report)
