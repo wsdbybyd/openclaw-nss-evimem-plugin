@@ -273,6 +273,8 @@ const validateArtifactClaimsTool = tools.get("nss_evimem_validate_artifact_claim
 const diagnoseFailureTool = tools.get("nss_evimem_diagnose_failure");
 const buildRerunContextTool = tools.get("nss_evimem_build_rerun_context");
 const buildInterventionTool = tools.get("nss_evimem_build_intervention");
+const validateContractParameters = validateContractTool.parameters.properties;
+const validateArtifactClaimsParameters = validateArtifactClaimsTool.parameters.properties;
 const taskContract = {
   domain: "demo",
   objective: "verified_artifact",
@@ -532,6 +534,11 @@ const summary = {
     && records[0].tool_name === "demo_user_tool"
     && records[0].artifacts.demo_result === resolve(artifactPath)
     && typeof records[0].artifact_hashes.demo_result === "string"
+    && validateContractTool.description.includes("verification_profile")
+    && validateArtifactClaimsTool.description.includes("evidence eligibility")
+    && validateArtifactClaimsTool.description.includes("hidden-oracle correctness")
+    && !["expected_answer", "oracle", "oracle_answer"].some((name) => name in validateContractParameters)
+    && !["expected_answer", "oracle", "oracle_answer"].some((name) => name in validateArtifactClaimsParameters)
     && promoted.details.memory_id === "mem_0001"
     && retrievedDetails.accepted.length === 1
     && staleDetails.accepted.length === 0
