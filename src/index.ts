@@ -301,7 +301,7 @@ function createValidateContractTool(): AnyAgentTool {
   return {
     name: "nss_evimem_validate_contract",
     label: "Validate Task Contract",
-    description: "Validate an Agent-generated candidate Task Contract and optionally persist it as the current session contract.",
+    description: "Validate an Agent-generated Task Contract, including an optional built-in verification_profile, and persist valid contracts.",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -340,7 +340,7 @@ function createValidateArtifactClaimsTool(): AnyAgentTool {
   return {
     name: "nss_evimem_validate_artifact_claims",
     label: "Validate Artifact Claims",
-    description: "Validate whether produced artifacts can support a verified cryptanalysis claim, including case-specific checks for known benchmark tasks.",
+    description: "Check whether result, report, and source artifacts satisfy the Task Contract's public verification profile. This checks evidence eligibility, not hidden-oracle correctness.",
     parameters: {
       type: "object",
       additionalProperties: false,

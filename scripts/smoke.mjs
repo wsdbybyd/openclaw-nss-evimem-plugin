@@ -392,6 +392,11 @@ const artifactClaimValidation = await validateArtifactClaimsTool.execute("artifa
     method: "script_search",
     objective: "verified_14_round_dl_distinguisher",
     scope: "full_cipher",
+    verification_profile: {
+      id: "simon_dl_distinguisher_v1",
+      primitive_profile: "simon_family_v1",
+      claim_mode: "exact_or_honest_bound",
+    },
   },
   result_path: badSimonResultPath,
   source_paths: [badSimonSourcePath],
@@ -552,7 +557,10 @@ const summary = {
     && artifactClaimValidationDetails.checks.some((check) => check.id === "dl_signed_sum_measurement" && check.status === "fail")
     && artifactClaimValidationDetails.checks.some((check) => check.id === "result_claim_consistency" && check.status === "fail")
     && artifactClaimValidationDetails.checks.some((check) => check.id === "runtime_duration_sane" && check.status === "fail")
-    && artifactClaimValidationFile.schema === "nss_evimem.artifact_claim_validation.v1"
+    && artifactClaimValidationFile.schema === "nss_evimem.artifact_claim_validation.v2"
+    && artifactClaimValidationDetails.verification_profile.id === "simon_dl_distinguisher_v1"
+    && artifactClaimValidationDetails.verification_scope === "evidence_eligibility_not_oracle_correctness"
+    && artifactClaimValidationDetails.recommended_claim_level === "reject"
     && artifactClaimValidationEvents.length === 1
     && contractEvents.length === 2
     && failureDiagnosisDetails.status === "needs_rerun"

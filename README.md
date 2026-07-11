@@ -95,21 +95,28 @@ The result includes `count` and a `capabilities` array. Add `tool_name` to filte
 
 ### `nss_evimem_validate_contract`
 
-Validates an Agent-generated candidate Task Contract. Natural-language understanding remains the Agent's job; the plugin only checks the structured contract for completeness, basic semantic consistency, optional support lists, and optional matching registered tools.
+Validates an Agent-generated Task Contract. Natural-language understanding remains the Agent's job; the plugin checks the structured contract for completeness, basic semantic consistency, optional support lists, optional matching registered tools, and an optional built-in `verification_profile`.
+
+`verification_profile` selects immutable public-process checks owned by the plugin. Agent-provided fields cannot disable mandatory checks.
 
 Input:
 
 ```json
 {
   "task_contract": {
+    "case_id": "CBSC-V2-NL-X01",
     "domain": "symmetric_cryptanalysis",
-    "cipher": "Simon32/64",
-    "rounds": 14,
-    "analysis_type": "differential_linear",
-    "method": "script_search",
-    "objective": "distinguisher_candidate",
-    "scope": "full_cipher",
-    "required_artifacts": ["code", "run_log", "search_result"]
+    "cipher": "SIMON32",
+    "rounds": 10,
+    "analysis_type": "differential",
+    "metric": "minimum_differential_weight_or_max_probability",
+    "objective": "reproduce_exact_metric_or_honest_bound",
+    "scope": "reduced_round",
+    "verification_profile": {
+      "id": "differential_metric_v1",
+      "primitive_profile": "simon_family_v1",
+      "claim_mode": "exact_or_honest_bound"
+    }
   },
   "require_matching_tool": true,
   "evidence_dir": "C:/tmp/nss-evimem-session"
@@ -127,21 +134,28 @@ Each validation is appended to `contract_validation_events.jsonl`. Valid contrac
 
 ### `nss_evimem_validate_artifact_claims`
 
-Validates whether produced artifacts can support a verified cryptanalysis claim. This tool does not solve the task and does not compare against hidden oracle answers. It checks artifact/report consistency and can apply public, case-aware verifier rules for known benchmark cases.
+Checks whether result, report, and source artifacts satisfy the Task Contract's public verification profile. This tool does not solve the task and does not compare against hidden oracle answers.
+
+`supports_verified_claim` means the artifacts are eligible to support a verified claim. It does not mean the numeric answer is benchmark-correct; hidden-oracle comparison belongs only to an offline evaluator.
 
 Input:
 
 ```json
 {
-  "case_id": "CBSC-V2-HARD-SIMON32-DL-SEARCH-002",
   "task_contract": {
+    "case_id": "CBSC-V2-NL-X01",
     "domain": "symmetric_cryptanalysis",
-    "cipher": "Simon32/64",
-    "rounds": 14,
-    "analysis_type": "differential_linear",
-    "method": "script_search",
-    "objective": "verified_14_round_dl_distinguisher",
-    "scope": "full_cipher"
+    "cipher": "SIMON32",
+    "rounds": 10,
+    "analysis_type": "differential",
+    "metric": "minimum_differential_weight_or_max_probability",
+    "objective": "reproduce_exact_metric_or_honest_bound",
+    "scope": "reduced_round",
+    "verification_profile": {
+      "id": "differential_metric_v1",
+      "primitive_profile": "simon_family_v1",
+      "claim_mode": "exact_or_honest_bound"
+    }
   },
   "result_path": "C:/tmp/run_result.json",
   "source_paths": ["C:/tmp/simon32_search.py"],
@@ -150,7 +164,13 @@ Input:
 }
 ```
 
-For the current Simon32/64 DL benchmark, the checker requires artifacts to show:
+Initial verification profiles:
+
+- `generic_artifact_consistency_v1`: generic result/report consistency and runtime checks; it can support only a candidate-level claim.
+- `differential_metric_v1`: public differential characteristic, probability, weight, and process-evidence checks.
+- `simon_dl_distinguisher_v1`: public SIMON32/64 differential-linear distinguisher process checks.
+
+For `simon_dl_distinguisher_v1`, the checker requires artifacts to show:
 
 - Simon32/64 rounds xoring the round key.
 - Simon32/64 key schedule constant `c=0xfffc`.
@@ -164,6 +184,13 @@ Outputs:
 
 - `artifact_claim_validation.json`: latest validation result.
 - `artifact_claim_validation_events.jsonl`: append-only validation history.
+
+`recommended_claim_level` is one of:
+
+- `verified`: the public process rules and evidence requirements passed.
+- `bounded`: the result is auditable but does not establish an exact or optimal claim.
+- `candidate`: the result is exploratory only.
+- `reject`: the artifacts contain a disqualifying inconsistency or missing mandatory evidence.
 
 ### `nss_evimem_diagnose_failure`
 
