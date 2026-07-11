@@ -372,6 +372,16 @@ test("does not accept sampling alone as proof of an exact optimum", (t) => {
   assert.equal(validation.recommended_claim_level, "bounded");
 });
 
+test("does not let a sampling proof certify itself as optimal", (t) => {
+  const validation = validate(t, validResult({
+    proof: { method: "sampling", status: "optimal" },
+  }));
+
+  assert.ok(validation.failures.includes("sampling_not_exact_proof"));
+  assert.equal(validation.supports_verified_claim, false);
+  assert.equal(validation.recommended_claim_level, "bounded");
+});
+
 test("accepts process-complete evidence without knowing an oracle answer", (t) => {
   const validation = validate(t, validResult());
   assert.equal(validation.schema, "nss_evimem.artifact_claim_validation.v2");

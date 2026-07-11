@@ -21,10 +21,14 @@ export function differentialMetricChecks(params: {
   const claimType = normalize(result.claim_type);
   const proof = isRecord(result.proof) ? result.proof : {};
   const proofMethod = normalize(proof.method);
+  const completeCoverage = isRecord(result.coverage) && normalize(result.coverage.status) === "complete";
+  const sourceReference = hasNonEmptyValue(result.source_reference);
+  const formalProof = normalize(proof.method) === "formal_proof";
   const exactnessEvidence = normalize(proof.status) === "optimal"
-    || normalize(proof.method) === "formal_proof"
-    || (isRecord(result.coverage) && normalize(result.coverage.status) === "complete")
-    || hasNonEmptyValue(result.source_reference);
+    || formalProof
+    || completeCoverage
+    || sourceReference;
+  const independentEvidenceForSampling = formalProof || completeCoverage || sourceReference;
   const samplingProof = /sampling|random|monte_carlo/.test(proofMethod);
   const simon = primitiveProfile === "simon_family_v1";
   const zeroClaim = simon && (rounds ?? 0) > 1 && nonzeroInput && exactClaim
@@ -57,7 +61,7 @@ export function differentialMetricChecks(params: {
     check("round_coverage_matches_contract", rounds !== null && numberValue(result.rounds) === rounds && (trail === null || trail.length === rounds), "high", "Reported rounds must match the Contract, and a supplied trail must cover those rounds."),
     check("round_weight_sum_consistency", weight === null || trailWeight === null || Math.abs(trailWeight - weight) <= 1e-9, "medium", "When both are present, per-round weights must sum to the reported total weight."),
     check("exactness_evidence_present", !exactClaim || exactnessEvidence, "medium", "Exact claims require structured proof, complete coverage, or a source reference."),
-    check("sampling_not_exact_proof", !(exactClaim && samplingProof && !exactnessEvidence), "medium", "Sampling-based methods cannot alone establish an exact claim."),
+    check("sampling_not_exact_proof", !(exactClaim && samplingProof && !independentEvidenceForSampling), "medium", "Sampling-based methods cannot alone establish an exact claim."),
     check("method_result_conflict_resolved", conflictResolved, "medium", "Conflicting method weights require a resolution or a bounded/candidate claim."),
     check("primitive_model_invariants", modelInvariants, "high", "SIMON artifacts must declare the required state, word size, rotations, and zero-input exclusion.", sourceSupportsModel ? "source supports state, word-size, and rotations; structured exclusion remains required" : undefined),
   ];
