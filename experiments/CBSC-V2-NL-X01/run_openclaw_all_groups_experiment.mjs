@@ -11,6 +11,12 @@ import {
 import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  commandLineWorkspaceRegexSource,
+  hasExactProbability,
+  hasExactWeight,
+  strictGuardAllows,
+} from "./evaluation-helpers.mjs";
 
 const CASE_ID = "CBSC-V2-NL-X01";
 const experimentDir = resolve(fileURLToPath(new URL(".", import.meta.url)));
@@ -198,12 +204,12 @@ function runOpenClaw(args, options = {}) {
 function cleanupArmProcesses({ startedAtIso, armWorkspaceRoot }) {
   const command = [
     `$started = [datetime]::Parse(${JSON.stringify(startedAtIso)}).AddSeconds(-5)`,
-    `$fragment = ${JSON.stringify(armWorkspaceRoot)}`,
+    `$workspacePattern = ${JSON.stringify(commandLineWorkspaceRegexSource(armWorkspaceRoot))}`,
     "$targets = Get-CimInstance Win32_Process | Where-Object {",
     "  ($_.Name -eq 'python.exe' -or $_.Name -eq 'py.exe') -and",
     "  $_.CommandLine -and",
     "  ([datetime]$_.CreationDate -ge $started) -and",
-    "  $_.CommandLine.Contains($fragment)",
+    "  ($_.CommandLine -match $workspacePattern)",
     "}",
     "$targets | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }",
     "$targets | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress",
@@ -303,8 +309,7 @@ function hasValidContract(evidenceDir) {
 }
 
 function hasGuardAllow(evidenceDir) {
-  return readJsonl(join(evidenceDir, "tool_guard_events.jsonl"))
-    .some((event) => typeof event.decision === "string" && event.decision.includes("allow"));
+  return strictGuardAllows(readJsonl(join(evidenceDir, "tool_guard_events.jsonl")));
 }
 
 function scoreMemoryRecord(record) {
@@ -429,43 +434,6 @@ function collectSourcePaths(root) {
   return listFiles(root)
     .filter((file) => /\.(py|sage|smt2|lp|mps|cpp|c)$/i.test(file))
     .map((file) => join(root, file));
-}
-
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function powerOfTwoExponent(probability) {
-  const match = String(probability ?? "").trim().match(/^2\s*(?:\^|\*\*)\s*(?:\{|\()?\s*-\s*(\d+(?:\.\d+)?)\s*(?:\}|\))?$/i);
-  return match?.[1] ?? null;
-}
-
-function normalizedMetric(value) {
-  return String(value ?? "")
-    .replace(/\s+/g, "")
-    .replace(/\*\*/g, "^")
-    .replace(/[{}()]/g, "")
-    .toLowerCase();
-}
-
-function hasExactProbability(text, expectedProbability) {
-  const exponent = powerOfTwoExponent(expectedProbability);
-  if (!exponent) {
-    const expected = normalizedMetric(expectedProbability);
-    return expected.length > 0 && normalizedMetric(text).includes(expected);
-  }
-  const expectedExponent = escapeRegExp(exponent);
-  return new RegExp(`2\\s*(?:\\^|\\*\\*)\\s*(?:\\{\\s*|\\(\\s*)?-\\s*${expectedExponent}(?:\\s*\\}|\\s*\\))?(?![\\d.])`, "i").test(text);
-}
-
-function hasExactWeight(text, expectedWeight) {
-  const numericWeight = Number(expectedWeight);
-  const expected = Number.isInteger(numericWeight)
-    ? `${escapeRegExp(String(expectedWeight))}(?:\\.0+)?`
-    : escapeRegExp(String(expectedWeight));
-  return new RegExp(`(?:differential\\s*)?weight[^0-9\\n]{0,40}${expected}(?![0-9.])`, "i").test(text)
-    || new RegExp(`minimum[^0-9\\n]{0,80}${expected}(?![0-9.])`, "i").test(text)
-    || new RegExp(`权重[^0-9\\n]{0,20}${expected}(?![0-9.])`, "i").test(text);
 }
 
 function hasInstanceBoundary(text) {

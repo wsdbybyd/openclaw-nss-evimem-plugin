@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { oracleScalarValues } from "./evaluation-helpers.mjs";
 
 const experimentDir = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const runDir = join(experimentDir, "runs", "openclaw-all-groups-isolated-latest");
@@ -18,19 +19,6 @@ function readJson(path) {
 
 function readText(path) {
   return readFileSync(path, "utf8");
-}
-
-function collectStringValues(value) {
-  if (typeof value === "string") {
-    return [value];
-  }
-  if (Array.isArray(value)) {
-    return value.flatMap(collectStringValues);
-  }
-  if (value && typeof value === "object") {
-    return Object.values(value).flatMap(collectStringValues);
-  }
-  return [];
 }
 
 function assertFile(path) {
@@ -69,7 +57,7 @@ const evaluations = Object.fromEntries(
 );
 const artifactValidation = readJson(join(runDir, "full_intervention", "evidence", "artifact_claim_validation.json"));
 const artifactTaskContract = JSON.stringify(artifactValidation.task_contract ?? null);
-const oracleValues = [...new Set(collectStringValues(summary.oracle_expected).filter((value) => value.trim()))];
+const oracleValues = oracleScalarValues(summary.oracle_expected);
 const fullIntervention = evaluations.full_intervention;
 const fullInterventionProtocolEvidence = fullIntervention.contract_valid === true
   && fullIntervention.tool_semantic_match === true

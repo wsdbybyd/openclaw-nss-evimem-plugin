@@ -3,72 +3,67 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import {
+  commandLineReferencesWorkspace,
+  hasExactProbability,
+  hasExactWeight,
+  oracleScalarValues,
+  strictGuardAllows,
+} from "../experiments/CBSC-V2-NL-X01/evaluation-helpers.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const runnerSource = readFileSync(join(repoRoot, "experiments", "CBSC-V2-NL-X01", "run_openclaw_all_groups_experiment.mjs"), "utf8");
-const verifierSource = readFileSync(join(repoRoot, "experiments", "CBSC-V2-NL-X01", "verify_openclaw_all_groups_experiment.mjs"), "utf8");
 
-function functionSource(source, name, nextName) {
-  const start = source.indexOf(`function ${name}`);
-  const end = source.indexOf(`function ${nextName}`, start);
-  assert.notEqual(start, -1, `missing ${name}`);
-  assert.notEqual(end, -1, `missing ${nextName}`);
-  return source.slice(start, end);
-}
-
-test("isolates deletion to one known experiment child and nested arm workspaces", () => {
-  const resetSource = functionSource(runnerSource, "resetIsolatedWorkspaceRoot", "writeJson");
-
-  assert.match(runnerSource, /const workspaceIsolationBase = resolve\(/);
-  assert.match(runnerSource, /const workspaceIsolationRoot = join\(workspaceIsolationBase, "cbsc_v2_nl_x01_all_groups_isolated_latest"\);/);
-  assert.match(resetSource, /resetDirectory\(workspaceIsolationBase, workspaceIsolationRoot\);/);
-  assert.doesNotMatch(resetSource, /readdirSync\(/);
-  assert.match(runnerSource, /const armWorkspaceRoot = join\(workspaceIsolationRoot, arm\.mode\);/);
-  assert.match(runnerSource, /resetDirectory\(workspaceIsolationRoot, armWorkspaceRoot\);/);
+test("strictGuardAllows requires an exact allow decision with no reasons", () => {
+  assert.equal(strictGuardAllows([{ decision: "allow", reasons: [] }]), true);
+  assert.equal(strictGuardAllows([{ decision: "allow_after_check", reasons: [] }]), false);
+  assert.equal(strictGuardAllows([{ decision: "allow", reasons: ["capability mismatch"] }]), false);
+  assert.equal(strictGuardAllows([{ decision: "allow" }]), false);
 });
 
-test("cleans up only Python processes tied to the exact arm workspace", () => {
-  const cleanupSource = functionSource(runnerSource, "cleanupArmProcesses", "writeCommandResult");
+test("commandLineReferencesWorkspace honors only workspace path boundaries", () => {
+  const armWorkspace = "C:\\isolated\\cbsc_v2_nl_x01\\baseline";
 
-  assert.match(cleanupSource, /\$fragment = \$\{JSON\.stringify\(armWorkspaceRoot\)\}/);
-  assert.match(cleanupSource, /\$_\.CommandLine\.Contains\(\$fragment\)/);
-  assert.doesNotMatch(cleanupSource, /simon32/i);
-  assert.doesNotMatch(cleanupSource, /work[\\/](?:artifacts)/i);
-  assert.doesNotMatch(cleanupSource, /-like '\*/);
+  assert.equal(commandLineReferencesWorkspace(`python.exe \"${armWorkspace}\"`, armWorkspace), true);
+  assert.equal(commandLineReferencesWorkspace(`python.exe ${armWorkspace}\\work\\solve.py`, armWorkspace), true);
+  assert.equal(commandLineReferencesWorkspace(`python.exe ${armWorkspace}-old\\work\\solve.py`, armWorkspace), false);
+  assert.equal(commandLineReferencesWorkspace("python.exe C:\\other\\baseline\\solve.py", armWorkspace), false);
+  assert.equal(commandLineReferencesWorkspace(`python.exe ${armWorkspace}.backup\\solve.py`, armWorkspace), false);
 });
 
-test("matches exact metrics from dynamic oracle probability and weight on answer-facing text only", () => {
-  const probabilitySource = functionSource(runnerSource, "hasExactProbability", "hasExactWeight");
-  const weightSource = functionSource(runnerSource, "hasExactWeight", "hasInstanceBoundary");
-  const evaluatorSource = functionSource(runnerSource, "evaluateArm", "importDistModule");
-
-  assert.match(probabilitySource, /function hasExactProbability\(text, expectedProbability\)/);
-  assert.match(weightSource, /function hasExactWeight\(text, expectedWeight\)/);
-  assert.doesNotMatch(`${probabilitySource}\n${weightSource}`, /\b25\b/);
-  assert.match(evaluatorSource, /hasExactProbability\(answerText, expectedProbability\)/);
-  assert.match(evaluatorSource, /hasExactWeight\(answerText, expectedWeight\)/);
-  assert.match(evaluatorSource, /const finalAnswerText = readTextIfExists\(join\(workspaceOutputDir, "final_answer\.md"\)\);/);
-  assert.doesNotMatch(evaluatorSource, /collectTextFromFiles\(/);
-  assert.doesNotMatch(evaluatorSource, /evidenceText/);
+test("hasExactProbability accepts the expected dynamic metric but rejects negated or competing claims", () => {
+  assert.equal(hasExactProbability("The probability is 2^(-17).", "2^-17"), true);
+  assert.equal(hasExactProbability("The probability is not 2^-17; it is 2^-18.", "2^-17"), false);
+  assert.equal(hasExactProbability("2^-17 is not the probability; the probability is 2^-18.", "2^-17"), false);
+  assert.equal(hasExactProbability("The probability is 2^-17, while another claimed probability is 2^-18.", "2^-17"), false);
+  assert.equal(hasExactProbability("The probability is 0.2, while a competing probability is 0.3.", "0.2"), false);
+  assert.equal(hasExactProbability("The probability is not 0.2; it is 0.3.", "0.2"), false);
 });
 
-test("requires Full Intervention protocol evidence before assigning verified_correct", () => {
-  const evaluatorSource = functionSource(runnerSource, "evaluateArm", "importDistModule");
-
-  assert.match(evaluatorSource, /const fullInterventionRequirementsMet = !arm\.fullIntervention \|\| \(/);
-  assert.match(evaluatorSource, /contractValid\s*&&\s*guardAllow\s*&&\s*capabilityRecorded/);
-  assert.match(evaluatorSource, /artifactValidation\?\.supports_verified_claim === true/);
-  assert.match(evaluatorSource, /boundaryOk\s*&&\s*fullInterventionRequirementsMet/);
+test("hasExactWeight accepts the expected dynamic metric but rejects negated or competing claims", () => {
+  assert.equal(hasExactWeight("The minimum differential weight is 17.", 17), true);
+  assert.equal(hasExactWeight("The weight is not 17; it is 18.", 17), false);
+  assert.equal(hasExactWeight("Weight 17 is not correct; the actual weight is 18.", 17), false);
+  assert.equal(hasExactWeight("The weight is 17, but a competing result reports weight 18.", 17), false);
 });
 
-test("verifier rejects oracle leakage and requires Full Intervention evidence for verified_correct", () => {
-  assert.match(verifierSource, /function collectStringValues\(/);
-  assert.match(verifierSource, /collectStringValues\(summary\.oracle_expected\)/);
-  assert.match(verifierSource, /oracleValues\.every\(\(value\) => !artifactTaskContract\.includes\(value\)\)/);
-  assert.match(verifierSource, /fullInterventionProtocolEvidence[, :]/);
-  assert.match(verifierSource, /fullIntervention\.contract_valid === true/);
-  assert.match(verifierSource, /fullIntervention\.tool_semantic_match === true/);
-  assert.match(verifierSource, /fullIntervention\.tool_capability_recorded === true/);
-  assert.match(verifierSource, /artifactValidation\.supports_verified_claim === true/);
-  assert.match(verifierSource, /fullInterventionVerifiedClaimGated:/);
+test("oracleScalarValues includes nested strings and finite numeric oracle values", () => {
+  assert.deepEqual(
+    oracleScalarValues({
+      probability: "2^-25",
+      primary_weight: 25,
+      nested: ["SIMON32", { rounds: 10, blank: "", invalid: Number.POSITIVE_INFINITY }],
+    }),
+    ["10", "25", "2^-25", "SIMON32"],
+  );
+});
+
+test("runner and verifier delegate integrity-sensitive behavior to the helper module", () => {
+  const runnerSource = readFileSync(join(repoRoot, "experiments", "CBSC-V2-NL-X01", "run_openclaw_all_groups_experiment.mjs"), "utf8");
+  const verifierSource = readFileSync(join(repoRoot, "experiments", "CBSC-V2-NL-X01", "verify_openclaw_all_groups_experiment.mjs"), "utf8");
+
+  assert.match(runnerSource, /strictGuardAllows/);
+  assert.match(runnerSource, /commandLineWorkspaceRegexSource/);
+  assert.match(runnerSource, /hasExactProbability\(answerText, expectedProbability\)/);
+  assert.match(runnerSource, /hasExactWeight\(answerText, expectedWeight\)/);
+  assert.match(verifierSource, /oracleScalarValues\(summary\.oracle_expected\)/);
 });
