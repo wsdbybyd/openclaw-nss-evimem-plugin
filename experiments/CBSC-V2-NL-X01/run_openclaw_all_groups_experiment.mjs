@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   classifyArmCorrectness,
@@ -37,6 +38,7 @@ const pluginId = "openclaw-nss-evimem-plugin";
 const model = process.env.NSS_EVIMEM_MODEL ?? "bailian/qwen3.6-plus";
 const timeoutSeconds = Number(process.env.NSS_EVIMEM_OPENCLAW_TIMEOUT_SECONDS ?? 600);
 const spawnTimeoutMs = (timeoutSeconds + 120) * 1000;
+const experimentRunId = randomUUID();
 
 const arms = [
   {
@@ -621,7 +623,7 @@ async function prepareEvidenceMemory(evidenceDir) {
   return { importResult, summaryPath };
 }
 
-async function postprocessFullIntervention({ workspaceOutputDir, evidenceDir, commandResult }) {
+async function postprocessFullIntervention({ workspaceOutputDir, evidenceDir, commandResult, experimentRunId }) {
   const { validateArtifactClaims } = await importDistModule("artifact-claim-validator.js", "artifact-nl-x01");
   const { diagnoseFailure } = await importDistModule("failure-diagnosis.js", "failure-nl-x01");
   const resultPath = findFirstFile(workspaceOutputDir, [
@@ -661,7 +663,12 @@ async function postprocessFullIntervention({ workspaceOutputDir, evidenceDir, co
     ],
     evidence_dir: evidenceDir,
   });
-  return validation;
+  const boundValidation = {
+    ...validation,
+    experiment_run_id: experimentRunId,
+  };
+  writeJson(join(evidenceDir, "artifact_claim_validation.json"), boundValidation);
+  return boundValidation;
 }
 
 resetDirectory(experimentDir, runDir);
@@ -748,6 +755,7 @@ try {
         workspaceOutputDir: armWorkspaceDir,
         evidenceDir,
         commandResult,
+        experimentRunId,
       });
     }
 
@@ -794,6 +802,7 @@ writeJson(join(runDir, "openclaw_plugin_state_changes.json"), stateChanges.map((
 const summary = {
   schema: "nss_evimem.nl_x01_all_groups_summary.v1",
   case_id: CASE_ID,
+  experiment_run_id: experimentRunId,
   generated_at: new Date().toISOString(),
   model,
   openclaw_entry: openclawMjs,

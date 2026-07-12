@@ -5,6 +5,8 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  artifactBoundToCurrentRun,
+  artifactHasNoOracleScalars,
   canonicalJson,
   classifyArmCorrectness,
   commandLineWorkspaceRegexSource,
@@ -173,9 +175,58 @@ test("oracleScalarValues includes nested strings and finite numeric oracle value
   );
 });
 
+test("artifactHasNoOracleScalars scans every nested artifact field for oracle values", () => {
+  const oracleValues = ["2^-25", "25"];
+  const artifact = {
+    case_id: "CBSC-V2-NL-X01",
+    task_contract: { cipher: "SIMON32", rounds: 10 },
+    diagnostics: {
+      nested: ["public evidence", { leaked_metric: "2^-25" }],
+    },
+  };
+
+  assert.equal(artifactHasNoOracleScalars(artifact, oracleValues), false);
+  assert.equal(artifactHasNoOracleScalars({ ...artifact, diagnostics: { nested: ["public evidence"] } }, oracleValues), true);
+});
+
+test("artifactBoundToCurrentRun requires the current public run ID, case, and task contract", () => {
+  const summary = {
+    experiment_run_id: "b00b6f18-279f-45df-b388-9729c5598167",
+    case_id: "CBSC-V2-NL-X01",
+    task_contract: { rounds: 10, cipher: "SIMON32" },
+  };
+  const artifact = {
+    experiment_run_id: summary.experiment_run_id,
+    case_id: summary.case_id,
+    task_contract: { cipher: "SIMON32", rounds: 10 },
+  };
+
+  assert.equal(artifactBoundToCurrentRun({ artifact, summary }), true);
+  assert.equal(artifactBoundToCurrentRun({
+    artifact: { ...artifact, experiment_run_id: "70c55f36-56af-41a6-94d4-20a46a1fd5c7" },
+    summary,
+  }), false);
+  assert.equal(artifactBoundToCurrentRun({
+    artifact: { case_id: artifact.case_id, task_contract: artifact.task_contract },
+    summary,
+  }), false);
+});
+
 test("runner delegates correctness and protocol evidence to helper functions", () => {
   const runnerSource = readFileSync(join(repoRoot, "experiments", "CBSC-V2-NL-X01", "run_openclaw_all_groups_experiment.mjs"), "utf8");
 
   assert.match(runnerSource, /currentTaskProtocolEvidence/);
   assert.match(runnerSource, /classifyArmCorrectness/);
+});
+
+test("runner persists its public run ID and verifier delegates artifact integrity checks to helpers", () => {
+  const runnerSource = readFileSync(join(repoRoot, "experiments", "CBSC-V2-NL-X01", "run_openclaw_all_groups_experiment.mjs"), "utf8");
+  const verifierSource = readFileSync(join(repoRoot, "experiments", "CBSC-V2-NL-X01", "verify_openclaw_all_groups_experiment.mjs"), "utf8");
+
+  assert.match(runnerSource, /randomUUID/);
+  assert.match(runnerSource, /experiment_run_id:\s*experimentRunId/);
+  assert.match(runnerSource, /const boundValidation = \{\s*\.\.\.validation,\s*experiment_run_id:\s*experimentRunId,\s*\};/s);
+  assert.match(runnerSource, /writeJson\(join\(evidenceDir, "artifact_claim_validation\.json"\), boundValidation\)/);
+  assert.match(verifierSource, /artifactHasNoOracleScalars/);
+  assert.match(verifierSource, /artifactBoundToCurrentRun/);
 });

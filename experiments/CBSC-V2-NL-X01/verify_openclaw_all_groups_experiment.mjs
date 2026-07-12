@@ -1,7 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { canonicalJson, currentTaskProtocolEvidence, oracleScalarValues } from "./evaluation-helpers.mjs";
+import {
+  artifactBoundToCurrentRun,
+  artifactHasNoOracleScalars,
+  currentTaskProtocolEvidence,
+  oracleScalarValues,
+} from "./evaluation-helpers.mjs";
 
 const experimentDir = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const runDir = join(experimentDir, "runs", "openclaw-all-groups-isolated-latest");
@@ -72,16 +77,13 @@ const evaluations = Object.fromEntries(
   arms.map((arm) => [arm, readJson(join(runDir, arm, "evaluation.json"))]),
 );
 const artifactValidation = readJson(join(runDir, "full_intervention", "evidence", "artifact_claim_validation.json"));
-const artifactTaskContract = canonicalJson(artifactValidation.task_contract ?? null);
-const summaryTaskContract = canonicalJson(summary.task_contract ?? null);
 const oracleValues = oracleScalarValues(summary.oracle_expected);
 const oracleExpectationPresent = typeof summary.oracle_expected?.probability === "string"
   && summary.oracle_expected.probability.trim().length > 0
   && Number.isFinite(summary.oracle_expected.weight)
   && typeof summary.oracle_expected.source_key === "string"
   && summary.oracle_expected.source_key.trim().length > 0;
-const artifactBoundToCurrentRun = artifactValidation.case_id === summary.case_id
-  && artifactTaskContract === summaryTaskContract;
+const artifactMatchesCurrentRun = artifactBoundToCurrentRun({ artifact: artifactValidation, summary });
 const fullIntervention = evaluations.full_intervention;
 const fullInterventionEvidenceDir = join(runDir, "full_intervention", "evidence");
 const fullInterventionProtocolEvidence = currentTaskProtocolEvidence({
@@ -117,13 +119,13 @@ const checks = {
   evidenceOnlyImportedMemory: evaluations.evidence_only.evidence_memory_imported >= 24,
   contractGroupHasContract: evaluations.contract_capability.contract_valid === true,
   fullInterventionHasArtifactValidation: artifactValidation.schema === "nss_evimem.artifact_claim_validation.v2",
-  artifactBoundToCurrentRun,
+  artifactBoundToCurrentRun: artifactMatchesCurrentRun,
   fullInterventionUsesDifferentialProfile: artifactValidation.verification_profile?.id === "differential_metric_v1",
   artifactValidationSeparatesOracle: artifactValidation.verification_scope === "evidence_eligibility_not_oracle_correctness",
   fullInterventionClaimLevelRecorded: ["verified", "bounded", "candidate", "reject"].includes(artifactValidation.recommended_claim_level),
   oracleExpectationPresent,
   oracleRemainsOffline: oracleExpectationPresent
-    && oracleValues.every((value) => !artifactTaskContract.includes(value)),
+    && artifactHasNoOracleScalars(artifactValidation, oracleValues),
   fullInterventionProtocolEvidence,
   fullInterventionVerifiedClaimGated: fullIntervention.final_correctness !== "verified_correct"
     || (fullInterventionProtocolEvidence && artifactValidation.supports_verified_claim === true),

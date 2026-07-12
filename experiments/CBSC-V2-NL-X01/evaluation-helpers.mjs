@@ -24,6 +24,41 @@ function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+export function artifactHasNoOracleScalars(artifact, oracleValues) {
+  let serializedArtifact;
+  try {
+    serializedArtifact = JSON.stringify(artifact);
+  } catch {
+    return false;
+  }
+  if (typeof serializedArtifact !== "string") {
+    return false;
+  }
+
+  const values = Array.isArray(oracleValues) ? oracleValues : [oracleValues];
+  return values
+    .map((value) => typeof value === "string" && value.trim()
+      ? value
+      : typeof value === "number" && Number.isFinite(value)
+        ? String(value)
+        : null)
+    .filter(Boolean)
+    .every((value) => !serializedArtifact.includes(value));
+}
+
+export function artifactBoundToCurrentRun({ artifact, summary }) {
+  if (!isRecord(artifact) || !isRecord(summary)) {
+    return false;
+  }
+
+  const experimentRunId = summary.experiment_run_id;
+  return typeof experimentRunId === "string"
+    && experimentRunId.trim().length > 0
+    && artifact.experiment_run_id === experimentRunId
+    && artifact.case_id === summary.case_id
+    && canonicalJson(artifact.task_contract ?? null) === canonicalJson(summary.task_contract ?? null);
+}
+
 function isClauseBoundary(text, index) {
   const character = text[index];
   if (character !== ".") {
