@@ -283,6 +283,31 @@ test("top-level runner always postprocesses full intervention and gates correctn
   assert.match(runnerSource, /classifyArmCorrectness\(\{[\s\S]*?fullInterventionRequirementsMet,/);
 });
 
+test("runner gives each local arm a cloned config with an isolated workspace and preserves postprocessing after diagnosis errors", () => {
+  const runnerSource = readFileSync(join(repoRoot, "experiments", "CBSC-V2-NL-X01", "run_openclaw_all_groups_experiment.mjs"), "utf8");
+  const armConfigBlock = runnerSource.slice(
+    runnerSource.indexOf("function createArmOpenClawConfig"),
+    runnerSource.indexOf("function parseOpenClawPayloadText"),
+  );
+  const armExecutionBlock = runnerSource.slice(
+    runnerSource.indexOf("stateChanges.push({ action: arm.plugin"),
+    runnerSource.indexOf("writeCommandResult(armRunDir, commandResult)"),
+  );
+  const postprocessBlock = runnerSource.slice(
+    runnerSource.indexOf("async function postprocessFullIntervention"),
+    runnerSource.indexOf("resetDirectory(experimentDir, runDir)"),
+  );
+
+  assert.match(armConfigBlock, /copyFileSync\(openclawConfigPath, armOpenClawConfigPath\)/);
+  assert.match(armConfigBlock, /config\.agents \?\?= \{\}/);
+  assert.match(armConfigBlock, /config\.agents\.defaults \?\?= \{\}/);
+  assert.match(armConfigBlock, /config\.agents\.defaults\.workspace = armWorkspaceRoot/);
+  assert.match(armExecutionBlock, /stateChanges\.push\([\s\S]*?\);\s*const armOpenClawConfigPath = createArmOpenClawConfig/s);
+  assert.match(armExecutionBlock, /OPENCLAW_CONFIG: armOpenClawConfigPath/);
+  assert.match(postprocessBlock, /const validation = validateArtifactClaims\([\s\S]*?try \{[\s\S]*?diagnoseFailure\(/s);
+  assert.match(postprocessBlock, /catch \(error\) \{[\s\S]*?failure_diagnosis_error\.json/s);
+});
+
 test("runner does not follow symbolic links while collecting or copying workspace files", () => {
   const runnerSource = readFileSync(join(repoRoot, "experiments", "CBSC-V2-NL-X01", "run_openclaw_all_groups_experiment.mjs"), "utf8");
   const copyDirectorySource = runnerSource.slice(

@@ -296,11 +296,26 @@ function setPluginEnabled(enabled) {
   const result = runOpenClaw(["plugins", enabled ? "enable" : "disable", pluginId], {
     cwd: repoRoot,
     timeout: 120000,
+    env: {
+      ...process.env,
+      OPENCLAW_CONFIG: openclawConfigPath,
+    },
   });
   if (result.status !== 0) {
     throw new Error(`Failed to ${enabled ? "enable" : "disable"} ${pluginId}: ${result.stderr || result.stdout}`);
   }
   return result;
+}
+
+function createArmOpenClawConfig(armRunDir, armWorkspaceRoot) {
+  const armOpenClawConfigPath = join(armRunDir, "openclaw_config.json");
+  copyFileSync(openclawConfigPath, armOpenClawConfigPath);
+  const config = readJson(armOpenClawConfigPath);
+  config.agents ??= {};
+  config.agents.defaults ??= {};
+  config.agents.defaults.workspace = armWorkspaceRoot;
+  writeJson(armOpenClawConfigPath, config);
+  return armOpenClawConfigPath;
 }
 
 function parseOpenClawPayloadText(stdout) {
@@ -658,25 +673,33 @@ async function postprocessFullIntervention({ workspaceOutputDir, evidenceDir, co
     source_paths: sourcePaths,
     evidence_dir: evidenceDir,
   });
-  diagnoseFailure({
-    case_id: CASE_ID,
-    task_contract: taskContract,
-    run_summary: {
-      openclaw_exit_code: commandResult.status,
-      openclaw_signal: commandResult.signal,
-      openclaw_error: commandResult.error,
-      artifact_claim_validation_status: validation.status,
-      artifact_claim_supports_verified: validation.supports_verified_claim,
-      result_path: resultPath,
-      report_path: reportPath,
-      source_paths: sourcePaths,
-    },
-    observations: [
-      `Artifact claim validation status: ${validation.status}.`,
-      "NL-X01 differential metric profile checks public evidence eligibility; the oracle is handled offline by the evaluator.",
-    ],
-    evidence_dir: evidenceDir,
-  });
+  try {
+    diagnoseFailure({
+      case_id: CASE_ID,
+      task_contract: taskContract,
+      run_summary: {
+        openclaw_exit_code: commandResult.status,
+        openclaw_signal: commandResult.signal,
+        openclaw_error: commandResult.error,
+        artifact_claim_validation_status: validation.status,
+        artifact_claim_supports_verified: validation.supports_verified_claim,
+        result_path: resultPath,
+        report_path: reportPath,
+        source_paths: sourcePaths,
+      },
+      observations: [
+        `Artifact claim validation status: ${validation.status}.`,
+        "NL-X01 differential metric profile checks public evidence eligibility; the oracle is handled offline by the evaluator.",
+      ],
+      evidence_dir: evidenceDir,
+    });
+  } catch (error) {
+    writeJson(join(evidenceDir, "failure_diagnosis_error.json"), {
+      case_id: CASE_ID,
+      experiment_run_id: experimentRunId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
   const boundValidation = {
     ...validation,
     experiment_run_id: experimentRunId,
@@ -733,6 +756,7 @@ try {
     writeFileSync(join(armRunDir, "prompt.md"), prompt, "utf8");
 
     stateChanges.push({ action: arm.plugin ? "enable" : "disable", arm: arm.mode, result: setPluginEnabled(arm.plugin) });
+    const armOpenClawConfigPath = createArmOpenClawConfig(armRunDir, armWorkspaceRoot);
     const armStartedAtIso = new Date().toISOString();
     const commandResult = runOpenClaw([
       "agent",
@@ -753,6 +777,7 @@ try {
       timeout: spawnTimeoutMs,
       env: {
         ...process.env,
+        OPENCLAW_CONFIG: armOpenClawConfigPath,
         NSS_EVIMEM_EVIDENCE_DIR: evidenceDir,
         NSS_EVIMEM_SESSION_ID: `cbsc_v2_nl_x01_isolated_${arm.mode}`,
       },
