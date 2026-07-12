@@ -1,11 +1,11 @@
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -152,11 +152,16 @@ function readTextIfExists(path) {
   return existsSync(path) ? readFileSync(path, "utf8") : "";
 }
 
-function copyDirectoryIfExists(from, to) {
+function copyDirectoryIfExists(from, to, sourceRoot = from, targetRoot = to) {
+  assertInside(sourceRoot, from);
+  assertInside(targetRoot, to);
   if (!existsSync(from)) {
     return false;
   }
-  const stats = statSync(from);
+  const stats = lstatSync(from);
+  if (stats.isSymbolicLink()) {
+    return false;
+  }
   if (!stats.isDirectory()) {
     return false;
   }
@@ -164,9 +169,14 @@ function copyDirectoryIfExists(from, to) {
   for (const entry of readdirSync(from)) {
     const source = join(from, entry);
     const target = join(to, entry);
-    const entryStats = statSync(source);
+    assertInside(sourceRoot, source);
+    assertInside(targetRoot, target);
+    const entryStats = lstatSync(source);
+    if (entryStats.isSymbolicLink()) {
+      continue;
+    }
     if (entryStats.isDirectory()) {
-      copyDirectoryIfExists(source, target);
+      copyDirectoryIfExists(source, target, sourceRoot, targetRoot);
     } else if (entryStats.isFile()) {
       mkdirSync(dirname(target), { recursive: true });
       copyFileSync(source, target);
@@ -176,16 +186,25 @@ function copyDirectoryIfExists(from, to) {
 }
 
 function listFiles(dir, root = dir) {
+  assertInside(root, dir);
   if (!existsSync(dir)) {
+    return [];
+  }
+  const directoryStats = lstatSync(dir);
+  if (directoryStats.isSymbolicLink() || !directoryStats.isDirectory()) {
     return [];
   }
   return readdirSync(dir).flatMap((entry) => {
     const full = join(dir, entry);
-    const stats = statSync(full);
+    assertInside(root, full);
+    const stats = lstatSync(full);
+    if (stats.isSymbolicLink()) {
+      return [];
+    }
     if (stats.isDirectory()) {
       return listFiles(full, root);
     }
-    return [relative(root, full)];
+    return stats.isFile() ? [relative(root, full)] : [];
   });
 }
 

@@ -119,7 +119,7 @@ function lastLabelIndex(text, pattern) {
   return lastIndex;
 }
 
-function collectMetricCandidates(text, bounds, labelPattern, otherMetricLabelPattern) {
+function collectMetricCandidates(text, bounds, labelPattern, otherMetricLabelPattern, acceptsCandidate = () => true) {
   const clause = text.slice(bounds.start, bounds.end);
   const candidatePattern = /(?<![\d.])((?:2\s*(?:\^|\*\*)\s*(?:\{\s*|\(\s*)?-\s*\d+(?:\.\d+)?(?:\s*\}|\s*\))?)|(?:\d+(?:\.\d+)?(?:e[+-]?\d+)?|\d+\s*\/\s*\d+))(?!\d|\.\d)/gi;
   return collectMatches(clause, candidatePattern).map((match) => ({
@@ -128,13 +128,14 @@ function collectMetricCandidates(text, bounds, labelPattern, otherMetricLabelPat
     end: match.end + bounds.start,
   })).filter((candidate) => {
     const precedingText = text.slice(bounds.start, candidate.start);
-    return lastLabelIndex(precedingText, labelPattern) >= lastLabelIndex(precedingText, otherMetricLabelPattern);
+    return acceptsCandidate(candidate.value)
+      && lastLabelIndex(precedingText, labelPattern) >= lastLabelIndex(precedingText, otherMetricLabelPattern);
   });
 }
 
-function labelledMetricMatch(text, labelPattern, otherMetricLabelPattern, isExpectedCandidate) {
+function labelledMetricMatch(text, labelPattern, otherMetricLabelPattern, isExpectedCandidate, acceptsCandidate) {
   return collectLabelledClauses(text, labelPattern).some((bounds) => {
-    const candidates = collectMetricCandidates(text, bounds, labelPattern, otherMetricLabelPattern);
+    const candidates = collectMetricCandidates(text, bounds, labelPattern, otherMetricLabelPattern, acceptsCandidate);
     const expectedCandidates = candidates.filter(isExpectedCandidate);
     return expectedCandidates.some((candidate) => !isNegatedAssertion(text, candidate.start, candidate.end))
       && candidates
@@ -143,14 +144,30 @@ function labelledMetricMatch(text, labelPattern, otherMetricLabelPattern, isExpe
   });
 }
 
-function hasLabelledMetricCandidate(text, labelPattern, otherMetricLabelPattern) {
+function hasLabelledMetricCandidate(text, labelPattern, otherMetricLabelPattern, acceptsCandidate) {
   return collectLabelledClauses(text, labelPattern).some((bounds) => (
-    collectMetricCandidates(text, bounds, labelPattern, otherMetricLabelPattern).length > 0
+    collectMetricCandidates(text, bounds, labelPattern, otherMetricLabelPattern, acceptsCandidate).length > 0
   ));
 }
 
 const probabilityLabelPattern = /\b(?:probability|prob|p)\b/gi;
 const weightLabelPattern = /(?:\b(?:differential\s+)?weight\b|\bminimum(?:\s+differential)?(?:\s+weight)?\b|\u6743\u91cd)/gi;
+
+function isProbabilityMetricCandidate(value) {
+  const candidate = normalizedMetric(value);
+  if (/^2\^-\d+(?:\.\d+)?$/.test(candidate)) {
+    return true;
+  }
+  if (/^\d+\/\d+$/.test(candidate)) {
+    const [numerator, denominator] = candidate.split("/").map(Number);
+    return denominator !== 0 && numerator >= 0 && numerator <= denominator;
+  }
+  if (!/^(?:\d+(?:\.\d+)?|\d+(?:\.\d+)?e[+-]?\d+)$/.test(candidate)) {
+    return false;
+  }
+  const numericCandidate = Number(candidate);
+  return Number.isFinite(numericCandidate) && numericCandidate >= 0 && numericCandidate <= 1;
+}
 
 export function strictGuardAllows(events) {
   return Array.isArray(events) && events.some((event) => event?.decision === "allow"
@@ -236,6 +253,7 @@ export function hasExactProbability(text, expectedProbability) {
     probabilityLabelPattern,
     weightLabelPattern,
     (candidate) => normalizedMetric(candidate.value) === expected,
+    isProbabilityMetricCandidate,
   );
 }
 
@@ -258,7 +276,12 @@ export function hasConsistentExactMetric(text, expectedProbability, expectedWeig
   const answer = String(text ?? "");
   const exactProbabilityMatch = hasExactProbability(answer, expectedProbability);
   const exactWeightMatch = hasExactWeight(answer, expectedWeight);
-  const reportsProbability = hasLabelledMetricCandidate(answer, probabilityLabelPattern, weightLabelPattern);
+  const reportsProbability = hasLabelledMetricCandidate(
+    answer,
+    probabilityLabelPattern,
+    weightLabelPattern,
+    isProbabilityMetricCandidate,
+  );
   const reportsWeight = hasLabelledMetricCandidate(answer, weightLabelPattern, probabilityLabelPattern);
 
   return (exactProbabilityMatch || exactWeightMatch)

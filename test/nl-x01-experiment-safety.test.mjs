@@ -172,6 +172,7 @@ test("hasConsistentExactMetric rejects an incompatible explicitly reported compa
   assert.equal(hasConsistentExactMetric("The probability is 2^-25.", expectedProbability, expectedWeight), true);
   assert.equal(hasConsistentExactMetric("The differential weight is 25.", expectedProbability, expectedWeight), true);
   assert.equal(hasConsistentExactMetric("The probability is 2^-25; the differential weight is 25.", expectedProbability, expectedWeight), true);
+  assert.equal(hasConsistentExactMetric("The probability is 2^-25; for the 10-round trail the differential weight is 25.", expectedProbability, expectedWeight), true);
   assert.equal(hasConsistentExactMetric("The probability is 2^-99; the differential weight is 25.", expectedProbability, expectedWeight), false);
   assert.equal(hasConsistentExactMetric("The probability is 2^-25; the differential weight is 99.", expectedProbability, expectedWeight), false);
   assert.equal(hasConsistentExactMetric("The probability is 2^-99; the differential weight is 99.", expectedProbability, expectedWeight), false);
@@ -230,6 +231,25 @@ test("runner delegates correctness and protocol evidence to helper functions", (
 
   assert.match(runnerSource, /currentTaskProtocolEvidence/);
   assert.match(runnerSource, /classifyArmCorrectness/);
+});
+
+test("runner does not follow symbolic links while collecting or copying workspace files", () => {
+  const runnerSource = readFileSync(join(repoRoot, "experiments", "CBSC-V2-NL-X01", "run_openclaw_all_groups_experiment.mjs"), "utf8");
+  const copyDirectorySource = runnerSource.slice(
+    runnerSource.indexOf("function copyDirectoryIfExists"),
+    runnerSource.indexOf("function listFiles"),
+  );
+  const listFilesSource = runnerSource.slice(
+    runnerSource.indexOf("function listFiles"),
+    runnerSource.indexOf("function commandLine"),
+  );
+
+  assert.match(runnerSource, /\blstatSync\b/);
+  assert.match(copyDirectorySource, /lstatSync\(from\)/);
+  assert.match(copyDirectorySource, /stats\.isSymbolicLink\(\)\)\s*\{\s*return false;/);
+  assert.match(copyDirectorySource, /entryStats\.isSymbolicLink\(\)\)\s*\{\s*continue;/);
+  assert.match(listFilesSource, /lstatSync\(full\)/);
+  assert.match(listFilesSource, /stats\.isSymbolicLink\(\)\)\s*\{\s*return \[\];/);
 });
 
 test("runner persists its public run ID and verifier delegates artifact integrity checks to helpers", () => {
