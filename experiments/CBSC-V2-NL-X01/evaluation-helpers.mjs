@@ -2,11 +2,6 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function powerOfTwoExponent(probability) {
-  const match = String(probability ?? "").trim().match(/^2\s*(?:\^|\*\*)\s*(?:\{|\()?\s*-\s*(\d+(?:\.\d+)?)\s*(?:\}|\))?$/i);
-  return match?.[1] ?? null;
-}
-
 function normalizedMetric(value) {
   return String(value ?? "")
     .replace(/\s+/g, "")
@@ -15,23 +10,39 @@ function normalizedMetric(value) {
     .toLowerCase();
 }
 
-function clauseAround(text, start, end) {
-  const beforeBoundary = Math.max(
-    text.lastIndexOf(".", start - 1),
-    text.lastIndexOf(";", start - 1),
-    text.lastIndexOf("!", start - 1),
-    text.lastIndexOf("?", start - 1),
-    text.lastIndexOf("\n", start - 1),
-  );
-  const afterCandidates = [".", ";", "!", "?", "\n"]
-    .map((delimiter) => text.indexOf(delimiter, end))
-    .filter((index) => index !== -1);
-  const afterBoundary = afterCandidates.length > 0 ? Math.min(...afterCandidates) : text.length;
-  return text.slice(beforeBoundary + 1, afterBoundary);
+function isClauseBoundary(text, index) {
+  const character = text[index];
+  if (character !== ".") {
+    return character === "!" || character === "?" || character === "\n";
+  }
+  return !/\d/.test(text[index - 1] ?? "") || !/\d/.test(text[index + 1] ?? "");
+}
+
+function clauseBounds(text, start, end) {
+  let beforeBoundary = -1;
+  for (let index = start - 1; index >= 0; index -= 1) {
+    if (isClauseBoundary(text, index)) {
+      beforeBoundary = index;
+      break;
+    }
+  }
+
+  let afterBoundary = text.length;
+  for (let index = end; index < text.length; index += 1) {
+    if (isClauseBoundary(text, index)) {
+      afterBoundary = index;
+      break;
+    }
+  }
+  return { start: beforeBoundary + 1, end: afterBoundary };
 }
 
 function isNegatedAssertion(text, start, end) {
-  return /\b(?:not|no|incorrect|false|isn't|isnt|doesn't|doesnt)\b/i.test(clauseAround(text, start, end));
+  const { start: clauseStart, end: clauseEnd } = clauseBounds(text, start, end);
+  const before = text.slice(Math.max(clauseStart, start - 48), start);
+  const after = text.slice(end, Math.min(clauseEnd, end + 48));
+  return /\b(?:not|no|incorrect|false)\s*$/i.test(before)
+    || /^\s*(?:is|was|are|were|be)?\s*(?:not|incorrect|false)\b/i.test(after);
 }
 
 function collectMatches(text, pattern) {
@@ -40,6 +51,36 @@ function collectMatches(text, pattern) {
     start: match.index,
     end: match.index + match[0].length,
   }));
+}
+
+function collectLabelledClauses(text, labelPattern) {
+  const clauses = new Map();
+  for (const match of text.matchAll(labelPattern)) {
+    const bounds = clauseBounds(text, match.index, match.index + match[0].length);
+    clauses.set(`${bounds.start}:${bounds.end}`, bounds);
+  }
+  return [...clauses.values()];
+}
+
+function collectMetricCandidates(text, bounds) {
+  const clause = text.slice(bounds.start, bounds.end);
+  const candidatePattern = /(?<![\d.])((?:2\s*(?:\^|\*\*)\s*(?:\{\s*|\(\s*)?-\s*\d+(?:\.\d+)?(?:\s*\}|\s*\))?)|(?:\d+(?:\.\d+)?(?:e[+-]?\d+)?|\d+\s*\/\s*\d+))(?!\d|\.\d)/gi;
+  return collectMatches(clause, candidatePattern).map((match) => ({
+    ...match,
+    start: match.start + bounds.start,
+    end: match.end + bounds.start,
+  }));
+}
+
+function labelledMetricMatch(text, labelPattern, isExpectedCandidate) {
+  return collectLabelledClauses(text, labelPattern).some((bounds) => {
+    const candidates = collectMetricCandidates(text, bounds);
+    const expectedCandidates = candidates.filter(isExpectedCandidate);
+    return expectedCandidates.some((candidate) => !isNegatedAssertion(text, candidate.start, candidate.end))
+      && candidates
+        .filter((candidate) => !isExpectedCandidate(candidate))
+        .every((candidate) => isNegatedAssertion(text, candidate.start, candidate.end));
+  });
 }
 
 export function strictGuardAllows(events) {
@@ -57,35 +98,21 @@ export function commandLineReferencesWorkspace(commandLine, armWorkspaceRoot) {
   return new RegExp(commandLineWorkspaceRegexSource(armWorkspaceRoot), "i").test(String(commandLine ?? ""));
 }
 
+export function encodePowerShellScript(script) {
+  return Buffer.from(String(script ?? ""), "utf16le").toString("base64");
+}
+
 export function hasExactProbability(text, expectedProbability) {
   const answer = String(text ?? "");
-  const expectedExponent = powerOfTwoExponent(expectedProbability);
-
-  if (!expectedExponent) {
-    const expected = normalizedMetric(expectedProbability);
-    if (!expected || !normalizedMetric(answer).includes(expected)) {
-      return false;
-    }
-    const expectedSource = String(expectedProbability).trim().split(/\s+/).map(escapeRegExp).join("\\s*");
-    const expectedMatches = collectMatches(answer, new RegExp(`(${expectedSource})`, "gi"));
-    if (expectedMatches.length === 0 || expectedMatches.some((match) => isNegatedAssertion(answer, match.start, match.end))) {
-      return false;
-    }
-    const probabilityPattern = /\b(?:probability|prob|p)\b[^0-9\n]{0,40}(\d+(?:\.\d+)?(?:e[+-]?\d+)?|\d+\s*\/\s*\d+)(?![\d/])/gi;
-    return collectMatches(answer, probabilityPattern)
-      .filter((match) => normalizedMetric(match.value) !== expected)
-      .every((match) => isNegatedAssertion(answer, match.start, match.end));
-  }
-
-  const powerPattern = /2\s*(?:\^|\*\*)\s*(?:\{\s*|\(\s*)?-\s*(\d+(?:\.\d+)?)(?:\s*\}|\s*\))?(?!\d)/gi;
-  const matches = collectMatches(answer, powerPattern);
-  const expectedMatches = matches.filter((match) => match.value === expectedExponent);
-  if (expectedMatches.length === 0 || expectedMatches.some((match) => isNegatedAssertion(answer, match.start, match.end))) {
+  const expected = normalizedMetric(expectedProbability);
+  if (!expected) {
     return false;
   }
-  return matches
-    .filter((match) => match.value !== expectedExponent)
-    .every((match) => isNegatedAssertion(answer, match.start, match.end));
+  return labelledMetricMatch(
+    answer,
+    /\b(?:probability|prob|p)\b/gi,
+    (candidate) => normalizedMetric(candidate.value) === expected,
+  );
 }
 
 export function hasExactWeight(text, expectedWeight) {
@@ -95,15 +122,11 @@ export function hasExactWeight(text, expectedWeight) {
     return false;
   }
 
-  const weightPattern = /(?:\b(?:differential\s+)?weight\b|\bminimum(?:\s+differential)?(?:\s+weight)?\b|\u6743\u91cd)[^0-9\n]{0,40}(\d+(?:\.\d+)?)(?!\d)/gi;
-  const matches = collectMatches(answer, weightPattern);
-  const expectedMatches = matches.filter((match) => Number(match.value) === expected);
-  if (expectedMatches.length === 0 || expectedMatches.some((match) => isNegatedAssertion(answer, match.start, match.end))) {
-    return false;
-  }
-  return matches
-    .filter((match) => Number(match.value) !== expected)
-    .every((match) => isNegatedAssertion(answer, match.start, match.end));
+  return labelledMetricMatch(
+    answer,
+    /(?:\b(?:differential\s+)?weight\b|\bminimum(?:\s+differential)?(?:\s+weight)?\b|\u6743\u91cd)/gi,
+    (candidate) => Number(candidate.value) === expected,
+  );
 }
 
 export function oracleScalarValues(value) {

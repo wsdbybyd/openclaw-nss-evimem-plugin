@@ -27,6 +27,16 @@ function assertFile(path) {
   }
 }
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
 for (const arm of arms) {
   for (const relativePath of [
     `${arm}/prompt.md`,
@@ -56,8 +66,16 @@ const evaluations = Object.fromEntries(
   arms.map((arm) => [arm, readJson(join(runDir, arm, "evaluation.json"))]),
 );
 const artifactValidation = readJson(join(runDir, "full_intervention", "evidence", "artifact_claim_validation.json"));
-const artifactTaskContract = JSON.stringify(artifactValidation.task_contract ?? null);
+const artifactTaskContract = canonicalJson(artifactValidation.task_contract ?? null);
+const summaryTaskContract = canonicalJson(summary.task_contract ?? null);
 const oracleValues = oracleScalarValues(summary.oracle_expected);
+const oracleExpectationPresent = typeof summary.oracle_expected?.probability === "string"
+  && summary.oracle_expected.probability.trim().length > 0
+  && Number.isFinite(summary.oracle_expected.weight)
+  && typeof summary.oracle_expected.source_key === "string"
+  && summary.oracle_expected.source_key.trim().length > 0;
+const artifactBoundToCurrentRun = artifactValidation.case_id === summary.case_id
+  && artifactTaskContract === summaryTaskContract;
 const fullIntervention = evaluations.full_intervention;
 const fullInterventionProtocolEvidence = fullIntervention.contract_valid === true
   && fullIntervention.tool_semantic_match === true
@@ -87,10 +105,13 @@ const checks = {
   evidenceOnlyImportedMemory: evaluations.evidence_only.evidence_memory_imported >= 24,
   contractGroupHasContract: evaluations.contract_capability.contract_valid === true,
   fullInterventionHasArtifactValidation: artifactValidation.schema === "nss_evimem.artifact_claim_validation.v2",
+  artifactBoundToCurrentRun,
   fullInterventionUsesDifferentialProfile: artifactValidation.verification_profile?.id === "differential_metric_v1",
   artifactValidationSeparatesOracle: artifactValidation.verification_scope === "evidence_eligibility_not_oracle_correctness",
   fullInterventionClaimLevelRecorded: ["verified", "bounded", "candidate", "reject"].includes(artifactValidation.recommended_claim_level),
-  oracleRemainsOffline: oracleValues.every((value) => !artifactTaskContract.includes(value)),
+  oracleExpectationPresent,
+  oracleRemainsOffline: oracleExpectationPresent
+    && oracleValues.every((value) => !artifactTaskContract.includes(value)),
   fullInterventionProtocolEvidence,
   fullInterventionVerifiedClaimGated: fullIntervention.final_correctness !== "verified_correct"
     || (fullInterventionProtocolEvidence && artifactValidation.supports_verified_claim === true),

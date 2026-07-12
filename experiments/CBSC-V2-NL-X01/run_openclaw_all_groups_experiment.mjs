@@ -13,6 +13,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   commandLineWorkspaceRegexSource,
+  encodePowerShellScript,
   hasExactProbability,
   hasExactWeight,
   strictGuardAllows,
@@ -202,9 +203,10 @@ function runOpenClaw(args, options = {}) {
 }
 
 function cleanupArmProcesses({ startedAtIso, armWorkspaceRoot }) {
+  const powerShellSingleQuotedString = (value) => `'${String(value).replaceAll("'", "''")}'`;
   const command = [
-    `$started = [datetime]::Parse(${JSON.stringify(startedAtIso)}).AddSeconds(-5)`,
-    `$workspacePattern = ${JSON.stringify(commandLineWorkspaceRegexSource(armWorkspaceRoot))}`,
+    `$started = [datetime]::Parse(${powerShellSingleQuotedString(startedAtIso)}).AddSeconds(-5)`,
+    `$workspacePattern = ${powerShellSingleQuotedString(commandLineWorkspaceRegexSource(armWorkspaceRoot))}`,
     "$targets = Get-CimInstance Win32_Process | Where-Object {",
     "  ($_.Name -eq 'python.exe' -or $_.Name -eq 'py.exe') -and",
     "  $_.CommandLine -and",
@@ -214,8 +216,9 @@ function cleanupArmProcesses({ startedAtIso, armWorkspaceRoot }) {
     "$targets | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }",
     "$targets | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress",
   ].join("\n");
+  const encodedCommand = encodePowerShellScript(command);
 
-  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], {
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", encodedCommand], {
     cwd: repoRoot,
     encoding: "utf8",
     timeout: 30000,
@@ -776,6 +779,7 @@ const summary = {
   openclaw_entry: openclawMjs,
   workspace_isolation_base: workspaceIsolationBase,
   workspace_isolation_root: workspaceIsolationRoot,
+  task_contract: taskContract,
   oracle_expected: {
     probability: oracle.oracle_answer.probability,
     weight: oracle.oracle_answer.primary_weight,
