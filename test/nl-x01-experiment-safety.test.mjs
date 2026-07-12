@@ -13,9 +13,11 @@ import {
   commandLineReferencesWorkspace,
   currentTaskProtocolEvidence,
   encodePowerShellScript,
+  hasExpectedDifferentialMetricProfile,
   hasConsistentExactMetric,
   hasExactProbability,
   hasExactWeight,
+  oracleAnswerScalars,
   oracleScalarValues,
   strictGuardAllows,
 } from "../experiments/CBSC-V2-NL-X01/evaluation-helpers.mjs";
@@ -188,6 +190,40 @@ test("oracleScalarValues includes nested strings and finite numeric oracle value
     }),
     ["10", "25", "2^-25", "SIMON32"],
   );
+});
+
+test("oracleAnswerScalars uses only nested hidden answer scalars and catches a nested artifact leak", () => {
+  const oracle = {
+    case_id: "CBSC-V2-NL-X01",
+    instance: { cipher: "SIMON32", rounds: 10 },
+    oracle_answer: {
+      probability: "2^-25",
+      primary_weight: 25,
+      provenance: { source_key: "trail-25", alternatives: ["2^-25", 26] },
+    },
+  };
+  const answerScalars = oracleAnswerScalars(oracle);
+  const artifact = {
+    task_contract: { cipher: "SIMON32", rounds: 10 },
+    diagnostics: { nested: [{ leaked_source: "trail-25" }] },
+  };
+
+  assert.deepEqual(answerScalars, ["25", "26", "2^-25", "trail-25"]);
+  assert.equal(artifactHasNoOracleScalars(artifact, answerScalars), false);
+});
+
+test("hasExpectedDifferentialMetricProfile requires every selected profile field", () => {
+  const expectedProfile = {
+    id: "differential_metric_v1",
+    version: 1,
+    primitive_profile: "simon_family_v1",
+    claim_mode: "exact_or_honest_bound",
+  };
+
+  assert.equal(hasExpectedDifferentialMetricProfile(expectedProfile), true);
+  assert.equal(hasExpectedDifferentialMetricProfile({ ...expectedProfile, version: 2 }), false);
+  assert.equal(hasExpectedDifferentialMetricProfile({ ...expectedProfile, primitive_profile: "speck_family_v1" }), false);
+  assert.equal(hasExpectedDifferentialMetricProfile({ ...expectedProfile, claim_mode: "exact_only" }), false);
 });
 
 test("artifactHasNoOracleScalars scans every nested artifact field for oracle values", () => {

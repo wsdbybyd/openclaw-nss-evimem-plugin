@@ -5,10 +5,15 @@ import {
   artifactBoundToCurrentRun,
   artifactHasNoOracleScalars,
   currentTaskProtocolEvidence,
-  oracleScalarValues,
+  hasExpectedDifferentialMetricProfile,
+  oracleAnswerScalars,
 } from "./evaluation-helpers.mjs";
 
+const CASE_ID = "CBSC-V2-NL-X01";
 const experimentDir = resolve(fileURLToPath(new URL(".", import.meta.url)));
+const repoRoot = resolve(experimentDir, "..", "..");
+const workspaceRoot = resolve(process.env.NSS_EVIMEM_WORKSPACE_ROOT ?? resolve(repoRoot, ".."));
+const hiddenOraclePath = resolve(workspaceRoot, "v4版本benchmark", "tasks", CASE_ID, "hidden", "oracle.json");
 const runDir = join(experimentDir, "runs", "openclaw-all-groups-isolated-latest");
 
 const arms = [
@@ -70,14 +75,17 @@ assertFile(join(runDir, "experiment_report.md"));
 assertFile(join(runDir, "comparison_matrix.csv"));
 assertFile(join(runDir, "full_intervention", "evidence", "artifact_claim_validation.json"));
 assertFile(join(runDir, "full_intervention", "evidence", "failure_diagnosis.json"));
+assertFile(hiddenOraclePath);
 
 const summary = readJson(join(runDir, "experiment_summary.json"));
+const oracle = readJson(hiddenOraclePath);
 const report = readText(join(runDir, "experiment_report.md"));
 const evaluations = Object.fromEntries(
   arms.map((arm) => [arm, readJson(join(runDir, arm, "evaluation.json"))]),
 );
 const artifactValidation = readJson(join(runDir, "full_intervention", "evidence", "artifact_claim_validation.json"));
-const oracleValues = oracleScalarValues(summary.oracle_expected);
+const oracleValues = oracleAnswerScalars(oracle);
+const oracleAnswerScalarsPresent = oracleValues.length > 0;
 const oracleExpectationPresent = typeof summary.oracle_expected?.probability === "string"
   && summary.oracle_expected.probability.trim().length > 0
   && Number.isFinite(summary.oracle_expected.weight)
@@ -106,7 +114,7 @@ const allowedCorrectness = [
 
 const checks = {
   summarySchema: summary.schema === "nss_evimem.nl_x01_all_groups_summary.v1",
-  caseIdMatches: summary.case_id === "CBSC-V2-NL-X01",
+  caseIdMatches: summary.case_id === CASE_ID,
   hasFourArms: arms.every((arm) => typeof summary.arms?.[arm] === "object"),
   modesMatch: arms.every((arm) => evaluations[arm].mode === arm),
   allAttempted: arms.every((arm) => typeof evaluations[arm].openclaw_exit_code === "number"
@@ -120,11 +128,13 @@ const checks = {
   contractGroupHasContract: evaluations.contract_capability.contract_valid === true,
   fullInterventionHasArtifactValidation: artifactValidation.schema === "nss_evimem.artifact_claim_validation.v2",
   artifactBoundToCurrentRun: artifactMatchesCurrentRun,
-  fullInterventionUsesDifferentialProfile: artifactValidation.verification_profile?.id === "differential_metric_v1",
+  fullInterventionUsesDifferentialProfile: hasExpectedDifferentialMetricProfile(artifactValidation.verification_profile),
   artifactValidationSeparatesOracle: artifactValidation.verification_scope === "evidence_eligibility_not_oracle_correctness",
   fullInterventionClaimLevelRecorded: ["verified", "bounded", "candidate", "reject"].includes(artifactValidation.recommended_claim_level),
   oracleExpectationPresent,
+  oracleAnswerScalarsPresent,
   oracleRemainsOffline: oracleExpectationPresent
+    && oracleAnswerScalarsPresent
     && artifactHasNoOracleScalars(artifactValidation, oracleValues),
   fullInterventionProtocolEvidence,
   fullInterventionVerifiedClaimGated: fullIntervention.final_correctness !== "verified_correct"

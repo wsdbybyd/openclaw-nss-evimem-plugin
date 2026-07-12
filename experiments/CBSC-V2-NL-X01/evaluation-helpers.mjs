@@ -309,3 +309,15 @@ export function oracleScalarValues(value) {
   visit(value);
   return [...new Set(values)].sort();
 }
+
+export function oracleAnswerScalars(oracle) {
+  return oracleScalarValues(isRecord(oracle) ? oracle.oracle_answer : undefined);
+}
+
+export function hasExpectedDifferentialMetricProfile(profile) {
+  return isRecord(profile)
+    && profile.id === "differential_metric_v1"
+    && profile.version === 1
+    && profile.primitive_profile === "simon_family_v1"
+    && profile.claim_mode === "exact_or_honest_bound";
+}
