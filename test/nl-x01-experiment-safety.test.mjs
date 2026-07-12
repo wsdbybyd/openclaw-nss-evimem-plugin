@@ -13,6 +13,7 @@ import {
   commandLineReferencesWorkspace,
   currentTaskProtocolEvidence,
   encodePowerShellScript,
+  hasConsistentExactMetric,
   hasExactProbability,
   hasExactWeight,
   oracleScalarValues,
@@ -162,6 +163,18 @@ test("hasExactWeight accepts the expected dynamic metric but rejects negated or 
   assert.equal(hasExactWeight("Weight 17 is not correct; the actual weight is 18.", 17), false);
   assert.equal(hasExactWeight("The weight is 17, but a competing result reports weight 18.", 17), false);
   assert.equal(hasExactWeight("The weight is 17 or 18.", 17), false);
+});
+
+test("hasConsistentExactMetric rejects an incompatible explicitly reported companion metric", () => {
+  const expectedProbability = "2^-25";
+  const expectedWeight = 25;
+
+  assert.equal(hasConsistentExactMetric("The probability is 2^-25.", expectedProbability, expectedWeight), true);
+  assert.equal(hasConsistentExactMetric("The differential weight is 25.", expectedProbability, expectedWeight), true);
+  assert.equal(hasConsistentExactMetric("The probability is 2^-25; the differential weight is 25.", expectedProbability, expectedWeight), true);
+  assert.equal(hasConsistentExactMetric("The probability is 2^-99; the differential weight is 25.", expectedProbability, expectedWeight), false);
+  assert.equal(hasConsistentExactMetric("The probability is 2^-25; the differential weight is 99.", expectedProbability, expectedWeight), false);
+  assert.equal(hasConsistentExactMetric("The probability is 2^-99; the differential weight is 99.", expectedProbability, expectedWeight), false);
 });
 
 test("oracleScalarValues includes nested strings and finite numeric oracle values", () => {

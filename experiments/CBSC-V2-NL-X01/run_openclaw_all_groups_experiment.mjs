@@ -17,6 +17,7 @@ import {
   commandLineWorkspaceRegexSource,
   currentTaskProtocolEvidence,
   encodePowerShellScript,
+  hasConsistentExactMetric,
   hasExactProbability,
   hasExactWeight,
 } from "./evaluation-helpers.mjs";
@@ -522,7 +523,7 @@ function evaluateArm({ arm, commandResult, stdoutPath, workspaceOutputDir, evide
   const expectedWeight = oracle.oracle_answer.primary_weight;
   const exactProbabilityMatch = hasExactProbability(answerText, expectedProbability);
   const exactWeightMatch = hasExactWeight(answerText, expectedWeight);
-  const exactMetricMatch = exactProbabilityMatch || exactWeightMatch;
+  const exactMetricMatch = hasConsistentExactMetric(answerText, expectedProbability, expectedWeight);
   const instancePreserved = hasInstanceBoundary(answerText);
   const methodEvidence = hasMethodEvidence(answerText);
   const boundaryOk = claimBoundaryOk(answerText);

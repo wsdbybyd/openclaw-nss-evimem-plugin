@@ -143,6 +143,15 @@ function labelledMetricMatch(text, labelPattern, otherMetricLabelPattern, isExpe
   });
 }
 
+function hasLabelledMetricCandidate(text, labelPattern, otherMetricLabelPattern) {
+  return collectLabelledClauses(text, labelPattern).some((bounds) => (
+    collectMetricCandidates(text, bounds, labelPattern, otherMetricLabelPattern).length > 0
+  ));
+}
+
+const probabilityLabelPattern = /\b(?:probability|prob|p)\b/gi;
+const weightLabelPattern = /(?:\b(?:differential\s+)?weight\b|\bminimum(?:\s+differential)?(?:\s+weight)?\b|\u6743\u91cd)/gi;
+
 export function strictGuardAllows(events) {
   return Array.isArray(events) && events.some((event) => event?.decision === "allow"
     && Array.isArray(event.reasons)
@@ -224,8 +233,8 @@ export function hasExactProbability(text, expectedProbability) {
   }
   return labelledMetricMatch(
     answer,
-    /\b(?:probability|prob|p)\b/gi,
-    /(?:\b(?:differential\s+)?weight\b|\bminimum(?:\s+differential)?(?:\s+weight)?\b|\u6743\u91cd)/gi,
+    probabilityLabelPattern,
+    weightLabelPattern,
     (candidate) => normalizedMetric(candidate.value) === expected,
   );
 }
@@ -239,10 +248,22 @@ export function hasExactWeight(text, expectedWeight) {
 
   return labelledMetricMatch(
     answer,
-    /(?:\b(?:differential\s+)?weight\b|\bminimum(?:\s+differential)?(?:\s+weight)?\b|\u6743\u91cd)/gi,
-    /\b(?:probability|prob|p)\b/gi,
+    weightLabelPattern,
+    probabilityLabelPattern,
     (candidate) => Number(candidate.value) === expected,
   );
+}
+
+export function hasConsistentExactMetric(text, expectedProbability, expectedWeight) {
+  const answer = String(text ?? "");
+  const exactProbabilityMatch = hasExactProbability(answer, expectedProbability);
+  const exactWeightMatch = hasExactWeight(answer, expectedWeight);
+  const reportsProbability = hasLabelledMetricCandidate(answer, probabilityLabelPattern, weightLabelPattern);
+  const reportsWeight = hasLabelledMetricCandidate(answer, weightLabelPattern, probabilityLabelPattern);
+
+  return (exactProbabilityMatch || exactWeightMatch)
+    && (!reportsProbability || exactProbabilityMatch)
+    && (!reportsWeight || exactWeightMatch);
 }
 
 export function oracleScalarValues(value) {
