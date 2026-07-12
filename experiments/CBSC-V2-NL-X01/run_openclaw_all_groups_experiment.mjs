@@ -12,11 +12,12 @@ import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  classifyArmCorrectness,
   commandLineWorkspaceRegexSource,
+  currentTaskProtocolEvidence,
   encodePowerShellScript,
   hasExactProbability,
   hasExactWeight,
-  strictGuardAllows,
 } from "./evaluation-helpers.mjs";
 
 const CASE_ID = "CBSC-V2-NL-X01";
@@ -134,7 +135,14 @@ function readJson(path) {
 }
 
 function readJsonIfExists(path) {
-  return existsSync(path) ? readJson(path) : null;
+  if (!existsSync(path)) {
+    return null;
+  }
+  try {
+    return readJson(path);
+  } catch {
+    return null;
+  }
 }
 
 function readTextIfExists(path) {
@@ -306,13 +314,25 @@ function countJsonl(path) {
   return readJsonl(path).length;
 }
 
+function hasCurrentTaskProtocolEvidence(evidenceDir) {
+  return currentTaskProtocolEvidence({
+    contractEvents: readJsonl(join(evidenceDir, "contract_validation_events.jsonl")),
+    guardEvents: readJsonl(join(evidenceDir, "tool_guard_events.jsonl")),
+    capabilityRegistry: readJsonIfExists(join(evidenceDir, "tool_capabilities.json")) ?? {},
+    taskContract,
+  });
+}
+
 function hasValidContract(evidenceDir) {
-  return readJsonl(join(evidenceDir, "contract_validation_events.jsonl"))
-    .some((event) => event.ok === true && event.status === "valid_contract");
+  return hasCurrentTaskProtocolEvidence(evidenceDir);
 }
 
 function hasGuardAllow(evidenceDir) {
-  return strictGuardAllows(readJsonl(join(evidenceDir, "tool_guard_events.jsonl")));
+  return hasCurrentTaskProtocolEvidence(evidenceDir);
+}
+
+function capabilityRecorded(evidenceDir) {
+  return hasCurrentTaskProtocolEvidence(evidenceDir);
 }
 
 function scoreMemoryRecord(record) {
@@ -487,7 +507,7 @@ function isAgentTimeout(commandResult, payloadText) {
 function hasFullInterventionProtocolEvidence(evidenceDir) {
   return hasValidContract(evidenceDir)
     && hasGuardAllow(evidenceDir)
-    && existsSync(join(evidenceDir, "tool_capabilities.json"));
+    && capabilityRecorded(evidenceDir);
 }
 
 function evaluateArm({ arm, commandResult, stdoutPath, workspaceOutputDir, evidenceDir, oracle, importResult, artifactValidation }) {
@@ -505,6 +525,10 @@ function evaluateArm({ arm, commandResult, stdoutPath, workspaceOutputDir, evide
   const methodEvidence = hasMethodEvidence(answerText);
   const boundaryOk = claimBoundaryOk(answerText);
   const timeoutText = isAgentTimeout(commandResult, payloadText);
+  const runSucceeded = commandResult.status === 0
+    && !commandResult.signal
+    && !commandResult.error
+    && !timeoutText;
 
   const toolCalls = countJsonl(join(evidenceDir, "tool_calls.jsonl"));
   const memoryRecords = readJsonIfExists(join(evidenceDir, "memory_records.json"));
@@ -512,31 +536,27 @@ function evaluateArm({ arm, commandResult, stdoutPath, workspaceOutputDir, evide
   const nssToolUsageDetected = /nss_evimem_/i.test(answerText) || toolCalls > 0;
   const contractValid = hasValidContract(evidenceDir);
   const guardAllow = hasGuardAllow(evidenceDir);
-  const capabilityRecorded = existsSync(join(evidenceDir, "tool_capabilities.json"));
+  const recordedCapability = capabilityRecorded(evidenceDir);
   const artifactValidationRecorded = existsSync(join(evidenceDir, "artifact_claim_validation.json"));
   const failureDiagnosisRecorded = existsSync(join(evidenceDir, "failure_diagnosis.json"));
   const crossArmContamination = detectCrossArmContamination(arm, evidenceDir);
   const fullInterventionRequirementsMet = !arm.fullIntervention || (
-    contractValid && guardAllow && capabilityRecorded && artifactValidation?.supports_verified_claim === true
+    contractValid && guardAllow && recordedCapability && artifactValidation?.supports_verified_claim === true
   );
 
-  let finalCorrectness = "not_evaluable";
-  if ((commandResult.status !== 0 || timeoutText) && !exactMetricMatch) {
-    finalCorrectness = "agent_run_failed";
-  } else if (exactMetricMatch && instancePreserved && methodEvidence && boundaryOk && fullInterventionRequirementsMet) {
-    finalCorrectness = "verified_correct";
-  } else if (exactMetricMatch) {
-    finalCorrectness = "answer_matches_oracle_with_weak_evidence";
-  } else if (instancePreserved || methodEvidence) {
-    finalCorrectness = "partially_correct_or_insufficient";
-  }
-  if (crossArmContamination.detected) {
-    finalCorrectness = "protocol_violation";
-  }
+  const finalCorrectness = classifyArmCorrectness({
+    runSucceeded,
+    exactMetricMatch,
+    instancePreserved,
+    methodEvidence,
+    boundaryOk,
+    crossGroupContamination: crossArmContamination.detected,
+    fullInterventionRequirementsMet,
+  });
 
   let evidenceCompleteness = "none";
-  if (methodEvidence || toolCalls > 0 || contractValid || capabilityRecorded || artifactValidationRecorded || memoryCount > 0) {
-    evidenceCompleteness = contractValid && capabilityRecorded ? "complete_or_structured" : "partial";
+  if (methodEvidence || toolCalls > 0 || contractValid || recordedCapability || artifactValidationRecorded || memoryCount > 0) {
+    evidenceCompleteness = contractValid && recordedCapability ? "complete_or_structured" : "partial";
   }
   if (arm.mode === "baseline" && methodEvidence) {
     evidenceCompleteness = "visible_answer_evidence";
@@ -556,7 +576,7 @@ function evaluateArm({ arm, commandResult, stdoutPath, workspaceOutputDir, evide
     evidence_memory_total_records: importResult?.total_memory_records ?? memoryCount,
     contract_valid: contractValid,
     tool_semantic_match: guardAllow,
-    tool_capability_recorded: capabilityRecorded,
+    tool_capability_recorded: recordedCapability,
     artifact_claim_validation_recorded: artifactValidationRecorded,
     artifact_claim_validation_status: artifactValidation?.status ?? null,
     artifact_claim_supports_verified: artifactValidation?.supports_verified_claim ?? null,

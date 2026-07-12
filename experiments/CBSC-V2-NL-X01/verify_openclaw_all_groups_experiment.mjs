@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { oracleScalarValues } from "./evaluation-helpers.mjs";
+import { canonicalJson, currentTaskProtocolEvidence, oracleScalarValues } from "./evaluation-helpers.mjs";
 
 const experimentDir = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const runDir = join(experimentDir, "runs", "openclaw-all-groups-isolated-latest");
@@ -27,14 +27,20 @@ function assertFile(path) {
   }
 }
 
-function canonicalJson(value) {
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
+function readJsonl(path) {
+  if (!existsSync(path)) {
+    return [];
   }
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
+  return readFileSync(path, "utf8")
+    .split(/\r?\n/)
+    .filter((line) => line.trim().length > 0)
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line)];
+      } catch {
+        return [];
+      }
+    });
 }
 
 for (const arm of arms) {
@@ -77,9 +83,15 @@ const oracleExpectationPresent = typeof summary.oracle_expected?.probability ===
 const artifactBoundToCurrentRun = artifactValidation.case_id === summary.case_id
   && artifactTaskContract === summaryTaskContract;
 const fullIntervention = evaluations.full_intervention;
-const fullInterventionProtocolEvidence = fullIntervention.contract_valid === true
-  && fullIntervention.tool_semantic_match === true
-  && fullIntervention.tool_capability_recorded === true;
+const fullInterventionEvidenceDir = join(runDir, "full_intervention", "evidence");
+const fullInterventionProtocolEvidence = currentTaskProtocolEvidence({
+  contractEvents: readJsonl(join(fullInterventionEvidenceDir, "contract_validation_events.jsonl")),
+  guardEvents: readJsonl(join(fullInterventionEvidenceDir, "tool_guard_events.jsonl")),
+  capabilityRegistry: existsSync(join(fullInterventionEvidenceDir, "tool_capabilities.json"))
+    ? readJson(join(fullInterventionEvidenceDir, "tool_capabilities.json"))
+    : {},
+  taskContract: summary.task_contract,
+});
 
 const allowedCorrectness = [
   "verified_correct",

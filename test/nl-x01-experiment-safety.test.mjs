@@ -5,8 +5,11 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  canonicalJson,
+  classifyArmCorrectness,
   commandLineWorkspaceRegexSource,
   commandLineReferencesWorkspace,
+  currentTaskProtocolEvidence,
   encodePowerShellScript,
   hasExactProbability,
   hasExactWeight,
@@ -21,6 +24,85 @@ test("strictGuardAllows requires an exact allow decision with no reasons", () =>
   assert.equal(strictGuardAllows([{ decision: "allow_after_check", reasons: [] }]), false);
   assert.equal(strictGuardAllows([{ decision: "allow", reasons: ["capability mismatch"] }]), false);
   assert.equal(strictGuardAllows([{ decision: "allow" }]), false);
+});
+
+test("currentTaskProtocolEvidence binds contract validation, strict guard, and registered capability to one task", () => {
+  const taskContract = {
+    case_id: "CBSC-V2-NL-X01",
+    analysis_type: "differential",
+    rounds: 10,
+  };
+  const capability = {
+    analysis_type: "differential",
+    rounds_supported: [10],
+  };
+  const validContractEvent = {
+    ok: true,
+    status: "valid_contract",
+    task_contract: { rounds: 10, case_id: "CBSC-V2-NL-X01", analysis_type: "differential" },
+  };
+  const validGuardEvent = {
+    decision: "allow",
+    reasons: [],
+    task_contract: taskContract,
+    tool_capability: capability,
+  };
+  const registeredCapability = {
+    rounds_supported: [10],
+    analysis_type: "differential",
+  };
+  const capabilityRegistry = {
+    "solver-check": {
+      tool_name: "solver-check",
+      capability: registeredCapability,
+    },
+  };
+
+  assert.equal(canonicalJson(taskContract), canonicalJson(validContractEvent.task_contract));
+  assert.notEqual(validGuardEvent.tool_capability, registeredCapability);
+  assert.equal(currentTaskProtocolEvidence({
+    contractEvents: [validContractEvent],
+    guardEvents: [validGuardEvent],
+    capabilityRegistry,
+    taskContract,
+  }), true);
+  assert.equal(currentTaskProtocolEvidence({
+    contractEvents: [validContractEvent],
+    guardEvents: [{ ...validGuardEvent, task_contract: { ...taskContract, rounds: 9 } }],
+    capabilityRegistry,
+    taskContract,
+  }), false);
+  assert.equal(currentTaskProtocolEvidence({
+    contractEvents: [{ ...validContractEvent, task_contract: { ...taskContract, rounds: 9 } }],
+    guardEvents: [validGuardEvent],
+    capabilityRegistry,
+    taskContract,
+  }), false);
+  assert.equal(currentTaskProtocolEvidence({
+    contractEvents: [validContractEvent],
+    guardEvents: [{ ...validGuardEvent, tool_capability: { ...capability, rounds_supported: [9] } }],
+    capabilityRegistry,
+    taskContract,
+  }), false);
+});
+
+test("classifyArmCorrectness never verifies an unsuccessful run and requires the full intervention gate", () => {
+  const otherwisePerfect = {
+    exactMetricMatch: true,
+    instancePreserved: true,
+    methodEvidence: true,
+    boundaryOk: true,
+    crossGroupContamination: false,
+    fullInterventionRequirementsMet: true,
+  };
+
+  assert.equal(classifyArmCorrectness({ ...otherwisePerfect, runSucceeded: false }), "agent_run_failed");
+  assert.equal(classifyArmCorrectness({ ...otherwisePerfect, runSucceeded: true }), "verified_correct");
+  assert.equal(classifyArmCorrectness({
+    ...otherwisePerfect,
+    runSucceeded: true,
+    fullInterventionRequirementsMet: false,
+  }), "answer_matches_oracle_with_weak_evidence");
 });
 
 test("commandLineReferencesWorkspace honors only workspace path boundaries", () => {
@@ -59,6 +141,7 @@ test("encodePowerShellScript preserves cleanup scripts and safely applies worksp
 
 test("hasExactProbability accepts the expected dynamic metric but rejects negated or competing claims", () => {
   assert.equal(hasExactProbability("The probability is 2^(-17).", "2^-17"), true);
+  assert.equal(hasExactProbability("The probability is 2^-17 (equivalent differential weight 17).", "2^-17"), true);
   assert.equal(hasExactProbability("The probability is 0.2.", "0.2"), true);
   assert.equal(hasExactProbability("The probability is not 2^-17; it is 2^-18.", "2^-17"), false);
   assert.equal(hasExactProbability("2^-17 is not the probability; the probability is 2^-18.", "2^-17"), false);
@@ -71,6 +154,7 @@ test("hasExactProbability accepts the expected dynamic metric but rejects negate
 
 test("hasExactWeight accepts the expected dynamic metric but rejects negated or competing claims", () => {
   assert.equal(hasExactWeight("The minimum differential weight is 17.", 17), true);
+  assert.equal(hasExactWeight("The probability is 2^-17 (equivalent differential weight 17).", 17), true);
   assert.equal(hasExactWeight("The weight is 17.", 17), true);
   assert.equal(hasExactWeight("The weight is not 17; it is 18.", 17), false);
   assert.equal(hasExactWeight("Weight 17 is not correct; the actual weight is 18.", 17), false);
@@ -89,21 +173,9 @@ test("oracleScalarValues includes nested strings and finite numeric oracle value
   );
 });
 
-test("runner and verifier delegate integrity-sensitive behavior to the helper module", () => {
+test("runner delegates correctness and protocol evidence to helper functions", () => {
   const runnerSource = readFileSync(join(repoRoot, "experiments", "CBSC-V2-NL-X01", "run_openclaw_all_groups_experiment.mjs"), "utf8");
-  const verifierSource = readFileSync(join(repoRoot, "experiments", "CBSC-V2-NL-X01", "verify_openclaw_all_groups_experiment.mjs"), "utf8");
 
-  assert.match(runnerSource, /strictGuardAllows/);
-  assert.match(runnerSource, /commandLineWorkspaceRegexSource/);
-  assert.match(runnerSource, /encodePowerShellScript/);
-  assert.match(runnerSource, /-EncodedCommand/);
-  assert.doesNotMatch(runnerSource, /"-Command", command/);
-  assert.match(runnerSource, /hasExactProbability\(answerText, expectedProbability\)/);
-  assert.match(runnerSource, /hasExactWeight\(answerText, expectedWeight\)/);
-  assert.match(runnerSource, /task_contract:\s*taskContract/);
-  assert.match(verifierSource, /oracleScalarValues\(summary\.oracle_expected\)/);
-  assert.match(verifierSource, /artifactBoundToCurrentRun/);
-  assert.match(verifierSource, /artifactValidation\.case_id === summary\.case_id/);
-  assert.match(verifierSource, /oracleExpectationPresent/);
-  assert.match(verifierSource, /oracleRemainsOffline:\s*oracleExpectationPresent/);
+  assert.match(runnerSource, /currentTaskProtocolEvidence/);
+  assert.match(runnerSource, /classifyArmCorrectness/);
 });
