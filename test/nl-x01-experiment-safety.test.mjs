@@ -270,6 +270,19 @@ test("runner delegates correctness and protocol evidence to helper functions", (
   assert.match(runnerSource, /classifyArmCorrectness/);
 });
 
+test("top-level runner always postprocesses full intervention and gates correctness separately", () => {
+  const runnerSource = readFileSync(join(repoRoot, "experiments", "CBSC-V2-NL-X01", "run_openclaw_all_groups_experiment.mjs"), "utf8");
+  const postprocessBlock = runnerSource.slice(
+    runnerSource.indexOf("let artifactValidation = null;"),
+    runnerSource.indexOf("copyDirectoryIfExists(armWorkspaceDir"),
+  );
+
+  assert.match(postprocessBlock, /if \(arm\.fullIntervention\) \{\s*artifactValidation = await postprocessFullIntervention\(/s);
+  assert.doesNotMatch(postprocessBlock, /hasFullInterventionProtocolEvidence/);
+  assert.equal((runnerSource.match(/\bfullInterventionRequirementsMet\b/g) ?? []).length, 2);
+  assert.match(runnerSource, /classifyArmCorrectness\(\{[\s\S]*?fullInterventionRequirementsMet,/);
+});
+
 test("runner does not follow symbolic links while collecting or copying workspace files", () => {
   const runnerSource = readFileSync(join(repoRoot, "experiments", "CBSC-V2-NL-X01", "run_openclaw_all_groups_experiment.mjs"), "utf8");
   const copyDirectorySource = runnerSource.slice(

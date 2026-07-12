@@ -526,12 +526,6 @@ function isAgentTimeout(commandResult, payloadText) {
     || /ETIMEDOUT|timeout/i.test(commandResult.error ?? "");
 }
 
-function hasFullInterventionProtocolEvidence(evidenceDir) {
-  return hasValidContract(evidenceDir)
-    && hasGuardAllow(evidenceDir)
-    && capabilityRecorded(evidenceDir);
-}
-
 function evaluateArm({ arm, commandResult, stdoutPath, workspaceOutputDir, evidenceDir, oracle, importResult, artifactValidation }) {
   const stdout = readTextIfExists(stdoutPath);
   const payloadText = parseOpenClawPayloadText(stdout);
@@ -770,7 +764,7 @@ try {
     });
 
     let artifactValidation = null;
-    if (arm.fullIntervention && hasFullInterventionProtocolEvidence(evidenceDir)) {
+    if (arm.fullIntervention) {
       artifactValidation = await postprocessFullIntervention({
         workspaceOutputDir: armWorkspaceDir,
         evidenceDir,
