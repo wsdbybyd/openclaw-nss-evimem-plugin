@@ -157,6 +157,7 @@ test("hasExactProbability accepts the expected dynamic metric but rejects negate
 
 test("hasExactWeight accepts the expected dynamic metric but rejects negated or competing claims", () => {
   assert.equal(hasExactWeight("The minimum differential weight is 17.", 17), true);
+  assert.equal(hasExactWeight("For the 10-round instance, the minimum differential weight is 25.", 25), true);
   assert.equal(hasExactWeight("The probability is 2^-17 (equivalent differential weight 17).", 17), true);
   assert.equal(hasExactWeight("The weight is 17.", 17), true);
   assert.equal(hasExactWeight("The weight is not 17; it is 18.", 17), false);

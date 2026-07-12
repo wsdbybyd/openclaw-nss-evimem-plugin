@@ -128,8 +128,10 @@ function collectMetricCandidates(text, bounds, labelPattern, otherMetricLabelPat
     end: match.end + bounds.start,
   })).filter((candidate) => {
     const precedingText = text.slice(bounds.start, candidate.start);
+    const labelIndex = lastLabelIndex(precedingText, labelPattern);
     return acceptsCandidate(candidate.value)
-      && lastLabelIndex(precedingText, labelPattern) >= lastLabelIndex(precedingText, otherMetricLabelPattern);
+      && labelIndex >= 0
+      && labelIndex >= lastLabelIndex(precedingText, otherMetricLabelPattern);
   });
 }
 
