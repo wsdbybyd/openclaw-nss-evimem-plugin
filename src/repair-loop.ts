@@ -197,6 +197,12 @@ function instructionForCheck(checkId: string, reason: string): string {
   if (checkId === "simon_and_difference_semantics") {
     return "You must not encode the AND output difference as the bitwise AND of input differences. Do not use gamma <= alpha, gamma <= beta, gamma >= alpha + beta - 1 as the differential transition. Rebuild the model with a sound SIMON AND-difference relation that preserves base-state dependence and rotation correlation.";
   }
+  if (checkId === "simon_and_state_value_linkage") {
+    return "Bind the value variables to the rotated SIMON round-state bits, or replace them with a reviewed transition relation that already captures this dependency. Do not leave u/v-style actual-state variables unconstrained while using them to define the AND output difference or its probability.";
+  }
+  if (checkId === "simon_and_weight_proxy") {
+    return "Do not use an any-active-AND-input proxy as differential weight. Replace weight >= and_in1 and weight >= and_in2 objective logic with a reviewed SIMON AND transition formulation whose objective is derived from the transition probability, and provide executable evidence for that formulation.";
+  }
   return `Repair this failed requirement in fresh artifacts: ${reason}`;
 }
 

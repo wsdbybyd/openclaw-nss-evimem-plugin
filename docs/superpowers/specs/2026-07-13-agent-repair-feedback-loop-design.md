@@ -16,6 +16,9 @@ The plugin will add three connected capabilities.
    abstraction where an output difference is modeled as the bitwise AND of the
    two input differences. This is a model-semantics failure, not merely a
    missing-evidence failure.
+   It will also reject declared actual-state variables left unconstrained and
+   a total-weight objective that uses any active AND input as a probability
+   proxy.
 2. A new `nss_evimem_build_repair_feedback` tool will convert failed artifact
    checks and failure diagnosis into a persisted, machine-readable repair
    directive and a prompt patch for the Agent.

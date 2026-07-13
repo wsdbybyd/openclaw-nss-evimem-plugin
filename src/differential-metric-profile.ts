@@ -72,6 +72,18 @@ export function differentialMetricChecks(params: {
       "high",
       "SIMON differential models must not encode the AND output difference as the bitwise AND of input differences; use a sound transition relation that preserves state dependence and rotation correlation.",
     ),
+    check(
+      "simon_and_state_value_linkage",
+      !simon || !hasUnlinkedSimonStateValues(sourceText),
+      "high",
+      "SIMON AND-difference models that introduce actual-state value variables must constrain them to the corresponding rotated state bits; unconstrained values make the transition relation and probability invalid.",
+    ),
+    check(
+      "simon_and_weight_proxy",
+      !simon || !hasSimonAndWeightProxy(sourceText),
+      "high",
+      "SIMON differential weight must come from a sound AND transition probability relation; an objective that counts any active AND input difference as weight is not a valid probability model.",
+    ),
   ];
 }
 
@@ -201,6 +213,26 @@ function hasInvalidAndDifferenceAbstraction(sourceText: string): boolean {
     || (new RegExp(`${gamma}\\s*<=\\s*${alpha}`).test(source)
     && new RegExp(`${gamma}\\s*<=\\s*${beta}`).test(source)
     && new RegExp(`${gamma}\\s*>=\\s*${alpha}\\s*\\+\\s*${beta}\\s*-\\s*1\\b`).test(source));
+}
+
+function hasUnlinkedSimonStateValues(sourceText: string): boolean {
+  const source = normalize(sourceText);
+  const declaresValueVariables = /\bu\s*=\s*\{\}/.test(source) && /\bv\s*=\s*\{\}/.test(source);
+  const admitsTheyAreUnconstrained = source.includes("don't constrain the actual values")
+    || source.includes("do not constrain the actual values");
+  return declaresValueVariables && admitsTheyAreUnconstrained;
+}
+
+function hasSimonAndWeightProxy(sourceText: string): boolean {
+  const source = normalize(sourceText);
+  const variable = (name: string) => `\\b${name}(?:\\s*\\[[^\\]\\r\\n]+\\])?`;
+  const weight = variable("weight");
+  const inputOne = variable("and_in1");
+  const inputTwo = variable("and_in2");
+  const boundsBothInputs = new RegExp(`${weight}\\s*>=\\s*${inputOne}`).test(source)
+    && new RegExp(`${weight}\\s*>=\\s*${inputTwo}`).test(source);
+  const objectiveCountsWeight = new RegExp(`lpsum\\s*\\(\\s*\\[?\\s*${weight}`).test(source);
+  return boundsBothInputs && objectiveCountsWeight;
 }
 
 function isSimon32(contract: TaskContract, result: JsonRecord): boolean {

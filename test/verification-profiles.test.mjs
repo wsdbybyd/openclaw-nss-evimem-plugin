@@ -341,6 +341,53 @@ test("rejects a direct SIMON AND-difference equality", (t) => {
   assert.ok(validation.failures.includes("simon_and_difference_semantics"));
 });
 
+test("rejects a SIMON AND model that leaves declared state-value variables unconstrained", (t) => {
+  const { root, evidenceDir, sourcePath } = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(sourcePath, [
+    "SIMON_ROTATIONS = (1, 8, 2)",
+    "WORD_SIZE = 16",
+    "STATE_WORDS = 2",
+    "u = {}",
+    "v = {}",
+    "# For differential analysis, we don't constrain the actual values, only the differences.",
+  ].join("\n"), "utf8");
+
+  const validation = validateArtifactClaims({
+    task_contract: taskContract(),
+    result: validResult(),
+    source_paths: [sourcePath],
+    evidence_dir: evidenceDir,
+  });
+
+  assert.ok(validation.failures.includes("simon_and_state_value_linkage"));
+});
+
+test("rejects a SIMON model that uses an AND-input activity proxy as differential weight", (t) => {
+  const { root, evidenceDir, sourcePath } = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(sourcePath, [
+    "SIMON_ROTATIONS = (1, 8, 2)",
+    "WORD_SIZE = 16",
+    "STATE_WORDS = 2",
+    "and_in1 = {}",
+    "and_in2 = {}",
+    "weight = {}",
+    "prob += weight[(r, j)] >= and_in1[(r, j)]",
+    "prob += weight[(r, j)] >= and_in2[(r, j)]",
+    "total_weight = lpSum(weight[(r, j)] for r in range(R) for j in range(n))",
+  ].join("\n"), "utf8");
+
+  const validation = validateArtifactClaims({
+    task_contract: taskContract(),
+    result: validResult(),
+    source_paths: [sourcePath],
+    evidence_dir: evidenceDir,
+  });
+
+  assert.ok(validation.failures.includes("simon_and_weight_proxy"));
+});
+
 test("does not compare probability and weight unless both metrics are present", (t) => {
   const weightOnly = validate(t, validResult({ probability: undefined }));
   const probabilityOnly = validate(t, validResult({ total_weight: undefined }));

@@ -51,6 +51,30 @@ test("buildRepairFeedback turns a rejected AND model into a direct repair instru
   assert.match(readFileSync(feedback.output_files.repair_prompt, "utf8"), /rotation correlation/i);
 });
 
+test("buildRepairFeedback tells the Agent how to repair unlinked SIMON state values", (t) => {
+  const { evidenceDir } = fixture(t, {
+    failures: ["simon_and_state_value_linkage"],
+    status: "failed",
+    supports_verified_claim: false,
+  });
+
+  const feedback = buildRepairFeedback({ evidence_dir: evidenceDir });
+
+  assert.match(feedback.prompt_patch, /bind the value variables to the rotated SIMON round-state bits/i);
+});
+
+test("buildRepairFeedback rejects an AND-input activity proxy as a differential weight", (t) => {
+  const { evidenceDir } = fixture(t, {
+    failures: ["simon_and_weight_proxy"],
+    status: "failed",
+    supports_verified_claim: false,
+  });
+
+  const feedback = buildRepairFeedback({ evidence_dir: evidenceDir });
+
+  assert.match(feedback.prompt_patch, /do not use an any-active-and-input proxy as differential weight/i);
+});
+
 test("assessRepairAttempt requests independent verification after fresh validation passes", (t) => {
   const { evidenceDir, writeValidation } = fixture(t, {
     failures: ["simon_and_difference_semantics"],

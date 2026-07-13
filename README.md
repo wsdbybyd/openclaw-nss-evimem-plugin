@@ -303,7 +303,7 @@ Outputs:
 
 Builds a concrete, bounded repair instruction from the latest artifact validation and failure diagnosis. It is designed for a failed Agent artifact: the next Agent pass receives the exact failed checks, required fresh artifacts, prohibited shortcuts, and a retry budget of one to three attempts.
 
-For the SIMON differential profile, a source model that encodes the AND output difference as the bitwise AND of input differences is rejected with `simon_and_difference_semantics`. The feedback explicitly tells the Agent to replace that invalid transition relation rather than merely changing its final wording.
+For the SIMON differential profile, the plugin rejects an AND output difference encoded as the bitwise AND of input differences (`simon_and_difference_semantics`), actual-state variables used without state linkage (`simon_and_state_value_linkage`), and an any-active-input proxy used as differential weight (`simon_and_weight_proxy`). The feedback explicitly tells the Agent which transition or probability assumption must be replaced rather than merely changing its final wording.
 
 ### `nss_evimem_assess_repair_attempt`
 

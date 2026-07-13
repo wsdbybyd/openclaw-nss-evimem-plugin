@@ -198,6 +198,8 @@ function recommendClaimLevel(
     "probability_weight_consistency",
     "primitive_model_invariants",
     "simon_and_difference_semantics",
+    "simon_and_state_value_linkage",
+    "simon_and_weight_proxy",
   ].some((id) => failures.has(id))) processLevel = "reject";
   else if (["exactness_evidence_present", "sampling_not_exact_proof", "method_result_conflict_resolved"]
     .some((id) => failures.has(id))) processLevel = "bounded";
