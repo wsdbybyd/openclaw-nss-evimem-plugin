@@ -299,6 +299,48 @@ test("combines structured and source SIMON model evidence field by field", (t) =
   assert.equal(validation.failures.includes("primitive_model_invariants"), false);
 });
 
+test("rejects a SIMON model that treats AND output difference as input-difference AND", (t) => {
+  const { root, evidenceDir, sourcePath } = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(sourcePath, [
+    "SIMON_ROTATIONS = (1, 8, 2)",
+    "WORD_SIZE = 16",
+    "STATE_WORDS = 2",
+    "prob += gamma[(r, i)] <= alpha[(r, i)]",
+    "prob += gamma[(r, i)] <= beta[(r, i)]",
+    "prob += gamma[(r, i)] >= alpha[(r, i)] + beta[(r, i)] - 1",
+  ].join("\n"), "utf8");
+
+  const validation = validateArtifactClaims({
+    task_contract: taskContract(),
+    result: validResult(),
+    source_paths: [sourcePath],
+    evidence_dir: evidenceDir,
+  });
+
+  assert.ok(validation.failures.includes("simon_and_difference_semantics"));
+});
+
+test("rejects a direct SIMON AND-difference equality", (t) => {
+  const { root, evidenceDir, sourcePath } = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(sourcePath, [
+    "SIMON_ROTATIONS = (1, 8, 2)",
+    "WORD_SIZE = 16",
+    "STATE_WORDS = 2",
+    "gamma = alpha & beta",
+  ].join("\n"), "utf8");
+
+  const validation = validateArtifactClaims({
+    task_contract: taskContract(),
+    result: validResult(),
+    source_paths: [sourcePath],
+    evidence_dir: evidenceDir,
+  });
+
+  assert.ok(validation.failures.includes("simon_and_difference_semantics"));
+});
+
 test("does not compare probability and weight unless both metrics are present", (t) => {
   const weightOnly = validate(t, validResult({ probability: undefined }));
   const probabilityOnly = validate(t, validResult({ total_weight: undefined }));

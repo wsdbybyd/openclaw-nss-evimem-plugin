@@ -66,6 +66,12 @@ export function differentialMetricChecks(params: {
     check("sampling_not_exact_proof", !(exactClaim && samplingProof && !independentEvidenceForSampling), "medium", "Sampling-based methods cannot alone establish an exact claim."),
     check("method_result_conflict_resolved", conflictResolved, "medium", "Conflicting method weights require a resolution or a bounded/candidate claim."),
     check("primitive_model_invariants", modelInvariants, "high", "SIMON artifacts must declare the required state, word size, rotations, and zero-input exclusion.", sourceSupportsModel ? "source supports state, word-size, and rotations; structured exclusion remains required" : undefined),
+    check(
+      "simon_and_difference_semantics",
+      !simon || !hasInvalidAndDifferenceAbstraction(sourceText),
+      "high",
+      "SIMON differential models must not encode the AND output difference as the bitwise AND of input differences; use a sound transition relation that preserves state dependence and rotation correlation.",
+    ),
   ];
 }
 
@@ -183,6 +189,18 @@ function sourceHasWordSize(sourceText: string): boolean {
 
 function sourceHasStateWords(sourceText: string): boolean {
   return /(?:state_words|state words)\s*=\s*2\b/.test(normalize(sourceText));
+}
+
+function hasInvalidAndDifferenceAbstraction(sourceText: string): boolean {
+  const source = normalize(sourceText);
+  const variable = (name: string) => `\\b${name}(?:\\s*\\[[^\\]\\r\\n]+\\])?`;
+  const gamma = variable("gamma");
+  const alpha = variable("alpha");
+  const beta = variable("beta");
+  return new RegExp(`${gamma}\\s*(?:=|:=)\\s*${alpha}\\s*(?:&|\\band\\b)\\s*${beta}`).test(source)
+    || (new RegExp(`${gamma}\\s*<=\\s*${alpha}`).test(source)
+    && new RegExp(`${gamma}\\s*<=\\s*${beta}`).test(source)
+    && new RegExp(`${gamma}\\s*>=\\s*${alpha}\\s*\\+\\s*${beta}\\s*-\\s*1\\b`).test(source));
 }
 
 function isSimon32(contract: TaskContract, result: JsonRecord): boolean {

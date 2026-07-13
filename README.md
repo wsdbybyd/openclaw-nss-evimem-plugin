@@ -299,6 +299,24 @@ Outputs:
 - `intervention.md`: human-readable intervention bundle.
 - `prompt_patch`: text that can be inserted into the next Agent turn.
 
+### `nss_evimem_build_repair_feedback`
+
+Builds a concrete, bounded repair instruction from the latest artifact validation and failure diagnosis. It is designed for a failed Agent artifact: the next Agent pass receives the exact failed checks, required fresh artifacts, prohibited shortcuts, and a retry budget of one to three attempts.
+
+For the SIMON differential profile, a source model that encodes the AND output difference as the bitwise AND of input differences is rejected with `simon_and_difference_semantics`. The feedback explicitly tells the Agent to replace that invalid transition relation rather than merely changing its final wording.
+
+### `nss_evimem_assess_repair_attempt`
+
+Records a repair attempt after the Agent has generated fresh artifacts and called `nss_evimem_validate_artifact_claims` again. The current validation must differ from the validation that triggered the feedback; resubmitting the old artifact does not consume a retry or count as a repair.
+
+The required sequence is:
+
+```text
+validate artifacts -> diagnose failure -> build repair feedback -> Agent reruns -> validate fresh artifacts -> assess repair attempt -> independent verifier
+```
+
+Possible assessment states are `repair_required`, `report_boundary_required`, and `independent_verification_required`. The final state is deliberately not `verified_correct`: public artifact checks only establish eligibility for a separately configured trusted verifier. The plugin neither reads a hidden oracle nor lets an Agent self-certify its repair.
+
 ### `nss_evimem_import_pack`
 
 Imports an existing EvidenceMemory knowledge pack into the plugin memory store without modifying the source pack.
@@ -417,6 +435,11 @@ artifact_claim_validation_events.jsonl
 failure_diagnosis.json
 failure_diagnosis_events.jsonl
 rerun_plan.md
+repair_feedback.json
+repair_feedback_events.jsonl
+repair_prompt.md
+repair_attempt_assessment.json
+repair_attempts.jsonl
 ```
 
 ## Environment Variables

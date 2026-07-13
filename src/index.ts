@@ -2,6 +2,7 @@ import { getCallId, isRecord, recordToolEvidence, stableStringify, utcNow } from
 import { validateArtifactClaims } from "./artifact-claim-validator.js";
 import { diagnoseFailure } from "./failure-diagnosis.js";
 import { buildIntervention } from "./intervention-builder.js";
+import { assessRepairAttempt, buildRepairFeedback } from "./repair-loop.js";
 import { buildRerunContext } from "./rerun-context.js";
 import { validateTaskContract } from "./contract-validator.js";
 import { importEvidenceMemoryPack } from "./pack-importer.js";
@@ -107,6 +108,8 @@ function registerHelperTools(api: PluginApi): void {
     createValidateContractTool(),
     createValidateArtifactClaimsTool(),
     createDiagnoseFailureTool(),
+    createBuildRepairFeedbackTool(),
+    createAssessRepairAttemptTool(),
     createBuildRerunContextTool(),
     createBuildInterventionTool(),
   ]) {
@@ -402,6 +405,64 @@ function createDiagnoseFailureTool(): AnyAgentTool {
   };
 }
 
+function createBuildRepairFeedbackTool(): AnyAgentTool {
+  return {
+    name: "nss_evimem_build_repair_feedback",
+    label: "Build Repair Feedback",
+    description: "Turn the current artifact validation and failure diagnosis into a bounded, concrete repair instruction for the Agent. This never certifies oracle correctness.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        case_id: { type: "string" },
+        task_contract: { type: "object" },
+        artifact_validation_path: { type: "string" },
+        max_attempts: { type: "number", minimum: 1, maximum: 3 },
+        evidence_dir: { type: "string" },
+      },
+    },
+    async execute(_toolCallId: string, rawParams: unknown): Promise<AgentToolResult> {
+      const params = rawParams === undefined ? {} : requireRecord(rawParams);
+      const result = buildRepairFeedback({
+        case_id: optionalString(params.case_id),
+        task_contract: isRecord(params.task_contract) ? params.task_contract : undefined,
+        artifact_validation_path: optionalString(params.artifact_validation_path),
+        max_attempts: optionalAttemptLimit(params.max_attempts),
+        evidence_dir: optionalString(params.evidence_dir),
+      });
+      return jsonToolResult(result);
+    },
+  };
+}
+
+function createAssessRepairAttemptTool(): AnyAgentTool {
+  return {
+    name: "nss_evimem_assess_repair_attempt",
+    label: "Assess Repair Attempt",
+    description: "Record a fresh repaired artifact validation and decide whether another repair, a report boundary, or independent verification is required. This never returns verified correctness.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        repair_feedback_path: { type: "string" },
+        artifact_validation_path: { type: "string" },
+        attempt_summary: { type: "object" },
+        evidence_dir: { type: "string" },
+      },
+    },
+    async execute(_toolCallId: string, rawParams: unknown): Promise<AgentToolResult> {
+      const params = rawParams === undefined ? {} : requireRecord(rawParams);
+      const result = assessRepairAttempt({
+        repair_feedback_path: optionalString(params.repair_feedback_path),
+        artifact_validation_path: optionalString(params.artifact_validation_path),
+        attempt_summary: isRecord(params.attempt_summary) ? params.attempt_summary : undefined,
+        evidence_dir: optionalString(params.evidence_dir),
+      });
+      return jsonToolResult(result);
+    },
+  };
+}
+
 function createBuildRerunContextTool(): AnyAgentTool {
   return {
     name: "nss_evimem_build_rerun_context",
@@ -515,6 +576,16 @@ function optionalBoolean(value: unknown): boolean | undefined {
   }
   if (typeof value !== "boolean") {
     throw new Error("expected boolean");
+  }
+  return value;
+}
+
+function optionalAttemptLimit(value: unknown): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 3) {
+    throw new Error("max_attempts must be an integer from 1 through 3");
   }
   return value;
 }
